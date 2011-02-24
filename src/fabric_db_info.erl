@@ -62,8 +62,15 @@ merge_results(Info) ->
             [{compact_running, lists:member(true, X)} | Acc];
         (disk_size, X, Acc) ->
             [{disk_size, lists:sum(X)} | Acc];
+        (other, X, Acc) ->
+            [{other, {[{data_size, total_sizes(X)}]}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).
+
+total_sizes(X) ->
+    lists:foldl(fun({_,Size}, Acc) ->
+                    Acc + Size
+                end,0,X).
