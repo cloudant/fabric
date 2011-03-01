@@ -71,6 +71,6 @@ merge_results(Info) ->
     end, [{instance_start_time, <<"0">>}], Dict).
 
 total_sizes(X) ->
-    lists:foldl(fun({_,Size}, Acc) ->
+    lists:foldl(fun({[{_,Size}]}, Acc) ->
                     Acc + Size
                 end,0,X).
