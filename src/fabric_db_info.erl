@@ -63,14 +63,20 @@ merge_results(Info) ->
         (disk_size, X, Acc) ->
             [{disk_size, lists:sum(X)} | Acc];
         (other, X, Acc) ->
-            [{other, {[{data_size, total_sizes(X)}]}} | Acc];
+            [{other, {merge_other_results(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).
 
-total_sizes(X) ->
-    lists:foldl(fun({[{_,Size}]}, Acc) ->
-                    Acc + Size
-                end,0,X).
+merge_other_results(Results) ->
+    Dict = lists:foldl(fun({Props}, D) ->
+        lists:foldl(fun({K,V},D0) -> orddict:append(K,V,D0) end, D, Props)
+    end, orddict:new(), Results),
+    orddict:fold(fun
+        (data_size, X, Acc) ->
+            [{data_size, lists:sum(X)} | Acc];
+        (_, _, Acc) ->
+            Acc
+    end, [], Dict).
