@@ -28,7 +28,8 @@ go(DbName, Id, Options) ->
     R = couch_util:get_value(r, Options, couch_config:get("cluster","r","2")),
     RepairOpts = [{r, integer_to_list(N)} | Options],
     Acc0 = {Workers, min(N, list_to_integer(R)), []},
-    case fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
+    RexiMon = fabric_util:create_monitors(Workers),
+    try fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
     {ok, Reply} ->
         format_reply(Reply, SuppressDeletedDoc);
     {error, needs_repair, Reply} ->
@@ -49,6 +50,8 @@ go(DbName, Id, Options) ->
         end;
     Error ->
         Error
+    after
+        rexi_monitor:stop(RexiMon)
     end.
 
 format_reply({ok, #doc{deleted=true}}, true) ->
@@ -56,8 +59,12 @@ format_reply({ok, #doc{deleted=true}}, true) ->
 format_reply(Else, _) ->
     Else.
 
-handle_message({rexi_DOWN, _, _, _}, Worker, Acc0) ->
-    skip_message(Worker, Acc0);
+handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, {Workers, R, Replies}) ->
+    NewWorkers =
+        fabric_dict:filter(fun(#shard{node=Node}, _) ->
+                                Node =/= NodeRef
+                       end, Workers),
+    {ok, {NewWorkers, R, Replies}};
 handle_message({rexi_EXIT, _Reason}, Worker, Acc0) ->
     skip_message(Worker, Acc0);
 handle_message(Reply, Worker, {Workers, R, Replies}) ->

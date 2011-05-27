@@ -15,7 +15,7 @@
 -module(fabric_util).
 
 -export([submit_jobs/3, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
-        update_counter/3, remove_ancestors/2, kv/2]).
+        update_counter/3, remove_ancestors/2, create_monitors/1, quorum_met/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -120,6 +120,21 @@ remove_ancestors([{_,{{ok, #doc{revs = {Pos, Revs}}}, Count}} = Head | Tail], Ac
     [{Descendant, _} | _] ->
         remove_ancestors(update_counter(Descendant, Count, Tail), Acc)
     end.
+
+create_monitors(Shards) ->
+    MonRefs = lists:map(fun(#shard{node=Node}) ->
+                            {rexi_server, Node}
+                        end, Shards),
+    rexi_monitor:start(MonRefs).
+
+quorum_met(W, Replies) ->
+    Counters = lists:foldl(fun({#shard{name=Name},M},D) ->
+                               if M == ok ->
+                                   orddict:update_counter(Name,1,D);
+                                  true ->
+                                   D
+                               end end, orddict:new(), Replies),
+    lists:all(fun({_,Count}) -> Count >= W end, Counters).
 
 %% verify only id and rev are used in key.
 update_counter_test() ->
