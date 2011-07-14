@@ -159,19 +159,21 @@ maybe_answer(WorkerLen, W, Counters) ->
 db_create_ok_test() ->
     Shards = mem3_util:create_partition_map("foo",3,12,["node1","node2","node3"]),
     Acc0 = fabric_dict:init(Shards, nil),
+    WorkerLen = length(Shards),
     Result = lists:foldl(fun(Shard,{Acc,_}) ->
                         case handle_message(ok,Shard,Acc) of
                             {ok, NewAcc} ->
                                 {NewAcc,true};
                             {stop, ok} -> {Acc,true};
                             {error, _} -> {Acc, false}
-                        end end, {Acc0, true}, Shards),
+                        end end, {{WorkerLen, 3, Acc0}, true}, Shards),
     ?assertEqual(element(2,Result), true).
 
 db_create_file_exists_test() ->
     Shards = mem3_util:create_partition_map("foo",3,12,["node1","node2","node3","node4","node5"]),
     BadNo = random:uniform(length(Shards)),
     Acc0 = fabric_dict:init(Shards, nil),
+    WorkerLen = length(Shards),
     Result = lists:foldl(
                fun(Shard,{Acc,Iter,Bool}) ->
                        MessResult = case Iter of
@@ -186,5 +188,5 @@ db_create_file_exists_test() ->
                            {stop, ok} -> {Acc, Iter+1, Bool};
                            {error, _} -> {Acc, Iter+1, false}
                        end
-               end,{Acc0, 1, true}, Shards),
+               end,{{WorkerLen, 3, Acc0}, 1, true}, Shards),
     ?assertEqual(element(3,Result),false).

@@ -120,10 +120,4 @@ open_doc_test() ->
     ?assertEqual({error, needs_repair, Foo1}, handle_message(NF, nil, State1)),
 
     % 3 distinct edit branches result in quorum failure
-    ?assertEqual({error, needs_repair}, handle_message(Baz1, nil, State2)),
-
-    % bad node concludes voting w/o success, run sync repair to get the result
-    ?assertEqual(
-        {error, needs_repair},
-        handle_message({rexi_DOWN, 1, 2, 3}, nil, State2)
-    ).
+    ?assertEqual({error, needs_repair}, handle_message(Baz1, nil, State2)).
