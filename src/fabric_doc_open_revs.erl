@@ -59,7 +59,7 @@ go(DbName, Id, Revs, Options) ->
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, #state{workers=Workers}=State) ->
     NewWorkers =
-        fabric_dict:filter(fun(#shard{node=Node}, _) ->
+        lists:filter(fun(#shard{node=Node}) ->
                                 Node =/= NodeRef
                        end, Workers),
     skip(State#state{workers=NewWorkers});

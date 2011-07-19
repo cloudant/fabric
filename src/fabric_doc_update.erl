@@ -48,19 +48,16 @@ go(DbName, AllDocs, Opts) ->
 handle_message({rexi_DOWN, _, {_,NodeRef},_},
                _Worker,
                {_, _, _, GroupedDocs, _} = Acc0) ->
-    lists:foldl(fun({#shard{node=Node}=Shard,DocsToRemove},Acc) ->
+    NewAcc0 = lists:foldl(fun({#shard{node=Node}=Shard,_},Acc) ->
                     if Node =/= NodeRef ->
                         Acc;
                        true ->
                         {WC,LenDocs,W,GrpDocs,DocReplyDict} = Acc,
-                        NewDocReplyDict =
-                            lists:foldl(fun({Doc,_},Dict) ->
-                                            dict:erase(Doc,Dict)
-                                        end,DocReplyDict,DocsToRemove),
-                        NewGrpDocs = dict:erase(Shard,GrpDocs),
-                        {WC-1,LenDocs-(length(DocsToRemove)),W,NewGrpDocs,NewDocReplyDict}
+                        NewGrpDocs = lists:keydelete(Shard,1,GrpDocs),
+                        {WC,LenDocs,W,NewGrpDocs,DocReplyDict}
                     end
-                end,Acc0,GroupedDocs);
+                          end,Acc0,GroupedDocs),
+    skip_message(NewAcc0);
 handle_message({rexi_EXIT, _}, _Worker, Acc0) ->
     skip_message(Acc0);
 handle_message(internal_server_error, _Worker, Acc0) ->

@@ -61,7 +61,7 @@ format_reply(Else, _) ->
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, {Workers, R, Replies}) ->
     NewWorkers =
-        fabric_dict:filter(fun(#shard{node=Node}, _) ->
+        lists:filter(fun(#shard{node=Node}) ->
                                 Node =/= NodeRef
                        end, Workers),
     {ok, {NewWorkers, R, Replies}};
