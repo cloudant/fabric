@@ -123,9 +123,15 @@ remove_ancestors([{_,{{ok, #doc{revs = {Pos, Revs}}}, Count}} = Head | Tail], Ac
     end.
 
 create_monitors(Shards) ->
-    MonRefs = lists:map(fun(#shard{node=Node}) ->
-                            {rexi_server, Node}
-                        end, Shards),
+    MonRefs =
+        lists:foldl(fun(#shard{node=Node},Acc) ->
+                        case lists:member({rexi_server, Node}, Acc) of
+                        true ->
+                            Acc;
+                        false ->
+                            [{rexi_server, Node} | Acc]
+                        end
+                    end, [], Shards),
     rexi_monitor:start(MonRefs).
 
 quorum_met(W, Replies) ->
