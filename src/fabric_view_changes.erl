@@ -140,12 +140,19 @@ receive_results(Workers, State, Timeout, Callback, AccIn) ->
         {ok, NewState}
     end.
 
-handle_message({rexi_DOWN, _, {_, NodeRef}, _}, nil, #collector{counters=Counters}=State) ->
+handle_message({rexi_DOWN, _, {_, NodeRef}, _}, nil, State) ->
+    #collector{callback=Callback, counters=Counters, user_acc=Acc}=State,
     NewCounters =
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    {ok, State#collector{counters=NewCounters}};
+    case fabric_view:is_progress_possible(NewCounters) of
+    true ->
+        {ok, State#collector{counters = NewCounters}};
+    false ->
+        {ok, Resp} = Callback({error, {nodedown, <<"progress not possible">>}}, Acc),
+        {error, Resp}
+    end;
 
 handle_message({rexi_EXIT, Reason}, Worker, State) ->
     #collector{
