@@ -41,8 +41,13 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {Counters, Acc}) ->
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    {ok, {NewCounters, Acc}};
-
+    NewCountersLen = fabric_dict:size(NewCounters),
+    case fabric_dict:any(nil, NewCounters) andalso NewCountersLen > 0 of
+    true ->
+        {ok, {NewCounters, Acc}};
+    false ->
+        {stop, merge_results(lists:flatten(Acc))}
+    end;
 handle_message({ok, Info}, Shard, {Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of
     undefined ->

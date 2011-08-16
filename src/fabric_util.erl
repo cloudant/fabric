@@ -141,6 +141,8 @@ quorum_met(W, Replies) ->
                                   true ->
                                    D
                                end end, orddict:new(), Replies),
+    % note: lists:all can be vacuously true
+    orddict:size(Counters) > 0 andalso
     lists:all(fun({_,Count}) -> Count >= W end, Counters).
 
 %% verify only id and rev are used in key.

@@ -83,8 +83,8 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {WorkerLen, W, Counters}) 
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    {ok, {WorkerLen - (fabric_dict:size(Counters) - fabric_dict:size(NewCounters)),
-          W, NewCounters}};
+    maybe_answer(WorkerLen - (fabric_dict:size(Counters) - fabric_dict:size(NewCounters)),
+          W, NewCounters);
 
 handle_message(Msg, Shard, {WorkerLen, W, Counters}) ->
     C1 = fabric_dict:store(Shard, Msg, Counters),

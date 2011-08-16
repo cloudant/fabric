@@ -36,8 +36,13 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {WorkerLen, Counters, Acc}
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    {ok, {WorkerLen - (fabric_dict:size(Counters) - fabric_dict:size(NewCounters)),
-          NewCounters, Acc}};
+    NewWorkerLen = WorkerLen - (fabric_dict:size(Counters) - fabric_dict:size(NewCounters)),
+    case fabric_dict:any(nil, NewCounters) andalso (NewWorkerLen > 0) of
+    true ->
+        {ok, {NewWorkerLen, NewCounters, Acc}};
+    false ->
+        {stop, Acc}
+    end;
 
 handle_message({ok, Count}, Shard, {WorkerLen, Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of

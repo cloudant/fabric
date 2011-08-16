@@ -30,12 +30,21 @@ go(DbName) ->
         rexi_monitor:stop(RexiMon)
     end.
 
-handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {Counters, Acc}) ->
+handle_message({rexi_DOWN, _, {_,NodeRef},_}, #shard{dbname=Name}, {Counters, Acc}) ->
     NewCounters =
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    {ok, {NewCounters, Acc}};
+    case fabric_dict:any(nil, NewCounters) andalso (fabric_dict:size(NewCounters) > 0) of
+    true ->
+        {ok, {NewCounters, Acc}};
+    false ->
+        {stop, [
+                {db_name,Name},
+                {update_seq, fabric_view_changes:pack_seqs(NewCounters)} |
+                merge_results(lists:flatten(Acc))
+               ]}
+    end;
 
 handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of

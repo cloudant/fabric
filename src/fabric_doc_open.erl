@@ -64,7 +64,13 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, {Workers, R, Replies}) ->
         lists:filter(fun(#shard{node=Node}) ->
                                 Node =/= NodeRef
                        end, Workers),
-    {ok, {NewWorkers, R, Replies}};
+    % logic of skip_message but more than one worker may be deleted
+    case length(NewWorkers) =:= 1 of
+    true ->
+        {error, needs_repair};
+    false ->
+        {ok, {NewWorkers, R, Replies}}
+    end;
 handle_message({rexi_EXIT, _Reason}, Worker, Acc0) ->
     skip_message(Worker, Acc0);
 handle_message(Reply, Worker, {Workers, R, Replies}) ->
