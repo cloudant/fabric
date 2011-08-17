@@ -30,20 +30,16 @@ go(DbName) ->
         rexi_monitor:stop(RexiMon)
     end.
 
-handle_message({rexi_DOWN, _, {_,NodeRef},_}, #shard{dbname=Name}, {Counters, Acc}) ->
+handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {Counters, Acc}) ->
     NewCounters =
         fabric_dict:filter(fun(#shard{node=Node}, _) ->
                                 Node =/= NodeRef
                        end, Counters),
-    case fabric_dict:any(nil, NewCounters) andalso (fabric_dict:size(NewCounters) > 0) of
+    case fabric_view:is_progress_possible(NewCounters) of
     true ->
         {ok, {NewCounters, Acc}};
     false ->
-        {stop, [
-                {db_name,Name},
-                {update_seq, fabric_view_changes:pack_seqs(NewCounters)} |
-                merge_results(lists:flatten(Acc))
-               ]}
+        {error, {nodedown, <<"progress not possible">>}}
     end;
 
 handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->

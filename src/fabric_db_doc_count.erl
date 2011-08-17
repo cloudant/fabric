@@ -37,11 +37,11 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {WorkerLen, Counters, Acc}
                                 Node =/= NodeRef
                        end, Counters),
     NewWorkerLen = WorkerLen - (fabric_dict:size(Counters) - fabric_dict:size(NewCounters)),
-    case fabric_dict:any(nil, NewCounters) andalso (NewWorkerLen > 0) of
+    case fabric_view:is_progress_possible(NewCounters) of
     true ->
         {ok, {NewWorkerLen, NewCounters, Acc}};
     false ->
-        {stop, Acc}
+        {error, {nodedown, <<"progress not possible">>}}
     end;
 
 handle_message({ok, Count}, Shard, {WorkerLen, Counters, Acc}) ->
