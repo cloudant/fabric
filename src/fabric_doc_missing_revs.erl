@@ -31,9 +31,11 @@ go(DbName, AllIdsRevs, Options) ->
     ResultDict = dict:from_list([{Id, {{nil,Revs},[]}} || {Id, Revs} <- AllIdsRevs]),
     RexiMon = fabric_util:create_monitors(Workers),
     Acc0 = {length(Workers), ResultDict, Workers},
-    X = fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0),
-    rexi_monitor:stop(RexiMon),
-    X.
+    try
+        fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0)
+    after
+        rexi_monitor:stop(RexiMon)
+    end.
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {WorkerLen, ResultDict, Workers}) ->
     NewWorkers =
