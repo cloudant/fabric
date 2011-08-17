@@ -28,9 +28,26 @@ go(DbName, #doc{} = DDoc) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     Shards = mem3:shards(DbName),
     Workers = fabric_util:submit_jobs(Shards, group_info, [Group]),
+    RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil), []},
-    fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0).
+    try
+        fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0)
+    after
+        rexi_monitor:stop(RexiMon)
+    end.
 
+handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {Counters, Acc}) ->
+    NewCounters =
+        fabric_dict:filter(fun(#shard{node=Node}, _) ->
+                                Node =/= NodeRef
+                       end, Counters),
+    NewCountersLen = fabric_dict:size(NewCounters),
+    case fabric_dict:any(nil, NewCounters) andalso NewCountersLen > 0 of
+    true ->
+        {ok, {NewCounters, Acc}};
+    false ->
+        {stop, merge_results(lists:flatten(Acc))}
+    end;
 handle_message({ok, Info}, Shard, {Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of
     undefined ->
@@ -39,7 +56,8 @@ handle_message({ok, Info}, Shard, {Counters, Acc}) ->
     nil ->
         C1 = fabric_dict:store(Shard, ok, Counters),
         C2 = fabric_view:remove_overlapping_shards(Shard, C1),
-        case fabric_dict:any(nil, C2) of
+        C2Len = fabric_dict:size(C2),
+        case fabric_dict:any(nil, C2) andalso (C2Len > 0)  of
         true ->
             {ok, {C2, [Info|Acc]}};
         false ->

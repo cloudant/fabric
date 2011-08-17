@@ -29,11 +29,21 @@ go(DbName, AllIdsRevs, Options) ->
         Shard#shard{ref=Ref}
     end, group_idrevs_by_shard(DbName, AllIdsRevs)),
     ResultDict = dict:from_list([{Id, {{nil,Revs},[]}} || {Id, Revs} <- AllIdsRevs]),
+    RexiMon = fabric_util:create_monitors(Workers),
     Acc0 = {length(Workers), ResultDict, Workers},
-    fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0).
+    try
+        fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0)
+    after
+        rexi_monitor:stop(RexiMon)
+    end.
 
-handle_message({rexi_DOWN, _, _, _}, Worker, {W, D, Workers}) ->
-    skip_message({W,D,lists:delete(Worker, Workers)});
+handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {WorkerLen, ResultDict, Workers}) ->
+    NewWorkers =
+        fabric_dict:filter(fun(#shard{node=Node}, _) ->
+                                Node =/= NodeRef
+                       end, Workers),
+    NewWorkerLen = WorkerLen - (fabric_dict:size(Workers) - fabric_dict:size(NewWorkers)),
+    skip_message({NewWorkerLen, ResultDict, NewWorkers});
 handle_message({rexi_EXIT, _, _, _}, Worker, {W, D, Workers}) ->
     skip_message({W,D,lists:delete(Worker, Workers)});
 handle_message({ok, Results}, _Worker, {1, D0, _}) ->

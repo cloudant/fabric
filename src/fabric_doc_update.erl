@@ -30,19 +30,34 @@ go(DbName, AllDocs, Opts) ->
         {Shard#shard{ref=Ref}, Docs}
     end, group_docs_by_shard(DbName, AllDocs)),
     {Workers, _} = lists:unzip(GroupedDocs),
+    RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, couch_config:get("cluster","w","2")),
     Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
         dict:from_list([{Doc,[]} || Doc <- AllDocs])},
-    case fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
-    {ok, Results} ->
-        Reordered = couch_util:reorder_results(AllDocs, Results),
-        {ok, [R || R <- Reordered, R =/= noreply]};
-    Else ->
-        Else
+    try
+        fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
+        {ok, Results} ->
+            Reordered = couch_util:reorder_results(AllDocs, Results),
+            {ok, [R || R <- Reordered, R =/= noreply]};
+        Else ->
+            Else
+    after
+        rexi_monitor:stop(RexiMon)
     end.
 
-handle_message({rexi_DOWN, _, _, _}, _Worker, Acc0) ->
-    skip_message(Acc0);
+handle_message({rexi_DOWN, _, {_,NodeRef},_},
+               _Worker,
+               {_, _, _, GroupedDocs, _} = Acc0) ->
+    NewAcc0 = lists:foldl(fun({#shard{node=Node}=Shard,_},Acc) ->
+                    if Node =/= NodeRef ->
+                        Acc;
+                       true ->
+                        {WC,LenDocs,W,GrpDocs,DocReplyDict} = Acc,
+                        NewGrpDocs = lists:keydelete(Shard,1,GrpDocs),
+                        {WC,LenDocs,W,NewGrpDocs,DocReplyDict}
+                    end
+                          end,Acc0,GroupedDocs),
+    skip_message(NewAcc0);
 handle_message({rexi_EXIT, _}, _Worker, Acc0) ->
     skip_message(Acc0);
 handle_message(internal_server_error, _Worker, Acc0) ->
