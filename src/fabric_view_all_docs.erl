@@ -34,8 +34,10 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
         limit = Limit,
         user_acc = Acc0
     },
+    Timeout = list_to_integer(
+        couch_config:get("fabric", "view_timeout", "5000")),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3,
-        State, infinity, 5000) of
+        State, infinity, Timeout) of
     {ok, NewState} ->
         {ok, NewState#collector.user_acc};
     {timeout, NewState} ->
