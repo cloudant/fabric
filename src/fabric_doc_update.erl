@@ -35,11 +35,17 @@ go(DbName, AllDocs, Opts) ->
         dict:from_list([{Doc,[]} || Doc <- AllDocs])},
     case fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
     {ok, Results} ->
-        Reordered = couch_util:reorder_results(AllDocs, Results),
+        Reordered = reorder_results(AllDocs, Results, []),
         {ok, [R || R <- Reordered, R =/= noreply]};
     Else ->
         Else
     end.
+
+reorder_results([], [], Acc) ->
+    lists:reverse(Acc);
+reorder_results([Doc | RestDocs], Results, Acc) ->
+    Val = couch_util:get_value(Doc,Results),
+    reorder_results(RestDocs,lists:keydelete(Doc,1,Results),[Val | Acc]).
 
 handle_message({rexi_DOWN, _, _, _}, _Worker, Acc0) ->
     skip_message(Acc0);
@@ -57,7 +63,7 @@ handle_message({ok, Replies}, Worker, Acc0) ->
         % last message has arrived, we need to conclude things
         {W, Reply} = dict:fold(fun force_reply/3, {W,[]}, DocReplyDict),
         {stop, Reply};
-    {_, DocCount} ->
+    {_, _} ->
         % we've got at least one reply for each document, let's take a look
         case dict:fold(fun maybe_reply/3, {stop,W,[]}, DocReplyDict) of
         continue ->
@@ -78,7 +84,9 @@ force_reply(Doc, [], {W, Acc}) ->
 force_reply(Doc, [FirstReply|_] = Replies, {W, Acc}) ->
     case update_quorum_met(W, Replies) of
     {true, Reply} ->
-        {W, [{Doc,Reply} | Acc]};
+        {W, lists:foldl(fun(Elem, Acc1) ->
+                          [{Doc, Elem} | Acc1]
+                        end, Acc, Reply)};
     false ->
         twig:log(warn, "write quorum (~p) failed for ~s", [W, Doc#doc.id]),
         % TODO make a smarter choice than just picking the first reply
@@ -91,7 +99,9 @@ maybe_reply(_, _, continue) ->
 maybe_reply(Doc, Replies, {stop, W, Acc}) ->
     case update_quorum_met(W, Replies) of
     {true, Reply} ->
-        {stop, W, [{Doc, Reply} | Acc]};
+        {stop, W, lists:foldl(fun(Elem, Acc1) ->
+                                [{Doc, Elem} | Acc1]
+                            end, Acc, Reply)};
     false ->
         continue
     end.
@@ -102,8 +112,9 @@ update_quorum_met(W, Replies) ->
     case lists:dropwhile(fun({_, Count}) -> Count < W end, Counters) of
     [] ->
         false;
-    [{FinalReply, _} | _] ->
-        {true, FinalReply}
+    [{_, _} | _] ->
+        {Results, _} = lists:unzip(Counters),
+        {true, Results}
     end.
 
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
