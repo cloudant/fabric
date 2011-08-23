@@ -58,12 +58,12 @@ handle_message({ok, Replies}, Worker, Acc0) ->
     {WaitingCount, DocCount, W, GroupedDocs, DocReplyDict0} = Acc0,
     Docs = couch_util:get_value(Worker, GroupedDocs),
     DocReplyDict = append_update_replies(Docs, Replies, DocReplyDict0),
-    case {WaitingCount, dict:size(DocReplyDict)} of
-    {1, _} ->
+    case WaitingCount of
+    1 ->
         % last message has arrived, we need to conclude things
         {W, Reply} = dict:fold(fun force_reply/3, {W,[]}, DocReplyDict),
         {stop, Reply};
-    {_, _} ->
+    _ ->
         % we've got at least one reply for each document, let's take a look
         case dict:fold(fun maybe_reply/3, {stop,W,[]}, DocReplyDict) of
         continue ->
