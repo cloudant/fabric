@@ -44,8 +44,8 @@ go(DbName, AllDocs, Opts) ->
 reorder_results([], [], Acc) ->
     lists:reverse(Acc);
 reorder_results([Doc | RestDocs], Results, Acc) ->
-    Val = couch_util:get_value(Doc,Results),
-    reorder_results(RestDocs,lists:keydelete(Doc,1,Results),[Val | Acc]).
+    {value, {_, Val}, NewResults} = lists:keytake(Doc,1,Results),
+    reorder_results(RestDocs,NewResults,[Val | Acc]).
 
 handle_message({rexi_DOWN, _, _, _}, _Worker, Acc0) ->
     skip_message(Acc0);
@@ -64,7 +64,6 @@ handle_message({ok, Replies}, Worker, Acc0) ->
         {W, Reply} = dict:fold(fun force_reply/3, {W,[]}, DocReplyDict),
         {stop, Reply};
     _ ->
-        % we've got at least one reply for each document, let's take a look
         case dict:fold(fun maybe_reply/3, {stop,W,[]}, DocReplyDict) of
         continue ->
             {ok, {WaitingCount - 1, DocCount, W, GroupedDocs, DocReplyDict}};
@@ -112,8 +111,9 @@ update_quorum_met(W, Replies) ->
     case lists:dropwhile(fun({_, Count}) -> Count < W end, Counters) of
     [] ->
         false;
-    [{_, _} | _] ->
-        {Results, _} = lists:unzip(Counters),
+    [{_, _} | _] = RedCounters ->
+        {Results, _} = lists:unzip(RedCounters),
+        io:format("quorum results ~p ~n",[Results]),
         {true, Results}
     end.
 
