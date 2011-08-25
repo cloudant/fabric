@@ -113,7 +113,6 @@ update_quorum_met(W, Replies) ->
         false;
     [{_, _} | _] = RedCounters ->
         {Results, _} = lists:unzip(RedCounters),
-        io:format("quorum results ~p ~n",[Results]),
         {true, Results}
     end.
 
