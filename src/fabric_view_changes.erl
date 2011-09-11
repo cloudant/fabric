@@ -248,6 +248,9 @@ unpack_seqs(0, DbName) ->
 unpack_seqs("0", DbName) ->
     fabric_dict:init(mem3:shards(DbName), 0);
 
+unpack_seqs([_Seq, Packed], DbName) ->
+    unpack_seqs(Packed, DbName);
+
 unpack_seqs(Packed, DbName) ->
     {match, [Opaque]} = re:run(Packed, "(?<opaque>[a-zA-Z0-9-_]+)([\"\\]])*$",
         [{capture, [opaque], binary}]),
