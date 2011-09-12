@@ -155,6 +155,23 @@ handle_message({rexi_EXIT, Reason}, Worker, State) ->
         {error, Resp}
     end;
 
+handle_message({not_found,no_db_file}, Worker, State) ->
+    #collector{
+        callback=Callback,
+        counters=Counters0,
+        rows = Seqs0,
+        user_acc=Acc
+    } = State,
+    Counters = fabric_dict:erase(Worker, Counters0),
+    Seqs = fabric_dict:erase(Worker, Seqs0),
+    case fabric_view:is_progress_possible(Counters) of
+    true ->
+        {ok, State#collector{counters = Counters, rows=Seqs}};
+    false ->
+        {ok, Resp} = Callback({error, fabric_util:error_info({not_found,no_db_file})}, Acc),
+        {error, Resp}
+    end;
+
 handle_message(_, _, #collector{limit=0} = State) ->
     {stop, State};
 
