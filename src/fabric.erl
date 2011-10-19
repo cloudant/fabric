@@ -76,6 +76,7 @@ all_dbs(Prefix) when is_list(Prefix) ->
         {instance_start_time, binary()} |
         {doc_count, non_neg_integer()} |
         {doc_del_count, non_neg_integer()} |
+        {doc_conflict_count, non_neg_integer()} |
         {purge_seq, non_neg_integer()} |
         {compact_running, boolean()} |
         {disk_size, non_neg_integer()} |
