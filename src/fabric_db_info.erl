@@ -78,6 +78,8 @@ merge_results(Info) ->
             [{doc_count, lists:sum(X)} | Acc];
         (doc_del_count, X, Acc) ->
             [{doc_del_count, lists:sum(X)} | Acc];
+        (conflicts_count, X, Acc) ->
+            [{doc_conflict_count, lists:sum(X)} | Acc];
         (purge_seq, X, Acc) ->
             [{purge_seq, lists:sum(X)} | Acc];
         (compact_running, X, Acc) ->
