@@ -62,7 +62,8 @@ handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
         false ->
             {stop, [
                 {db_name,Name},
-                {update_seq, fabric_view_changes:pack_seqs(C2)} |
+                {update_seq, fabric_view_changes:pack_seqs(C2)},
+                {shard_info, {mem3_util:shard_info(Name)}} |
                 merge_results(lists:flatten([Info|Acc]))
             ]}
         end
