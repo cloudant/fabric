@@ -60,12 +60,12 @@ handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
         true ->
             {ok, {C2, [Info|Acc]}};
         false ->
+            MergedRes = merge_results(lists:flatten([Info|Acc])),
             {stop, [
                 {db_name,Name},
-                {update_seq, fabric_view_changes:pack_seqs(C2)},
-                {shard_info, {mem3_util:shard_info(Name)}} |
-                merge_results(lists:flatten([Info|Acc]))
-            ]}
+                {update_seq, fabric_view_changes:pack_seqs(C2)} |
+                add_to_other([{db_topology, {mem3_util:shard_info(Name)}}], MergedRes)
+                   ]}
         end
     end;
 handle_message(_, _, Acc) ->
@@ -103,3 +103,9 @@ merge_other_results(Results) ->
         (_, _, Acc) ->
             Acc
     end, [], Dict).
+
+add_to_other(Other, MergedResult) ->
+    {other, {Val}} = lists:keyfind(other, 1, MergedResult),
+    NewVal = Val ++ Other,
+    lists:keyreplace(other, 1, MergedResult, {other, {NewVal}}).
+
