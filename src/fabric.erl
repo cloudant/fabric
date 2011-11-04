@@ -30,7 +30,7 @@
     update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
 
 % Views
--export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
+-export([all_docs/5, changes/4, query_view/3, query_view/4, query_view/7,
     get_view_group_info/2]).
 
 % miscellany
@@ -192,18 +192,18 @@ get_missing_revs(DbName, IdsRevs, Options) when is_list(IdsRevs) ->
     {ok, any()} | any().
 update_doc(DbName, Doc, Options) ->
     case update_docs(DbName, [Doc], opts(Options)) of
-    {ok, [{ok, NewRev}]} ->
-        {ok, NewRev};
+    {ok, [{ok, NewRev}], EncShards} ->
+        {ok, NewRev, EncShards};
     {accepted, [{accepted, NewRev}]} ->
         {accepted, NewRev};
-    {ok, [{{_Id, _Rev}, Error}]} ->
+    {ok, [{{_Id, _Rev}, Error}], _} ->
         throw(Error);
-    {ok, [Error]} ->
+    {ok, [Error], _} ->
         throw(Error);
-    {ok, []} ->
+    {ok, [], EncShards} ->
         % replication success
         #doc{revs = {Pos, [RevId | _]}} = doc(Doc),
-        {ok, {Pos, RevId}}
+        {ok, {Pos, RevId}, EncShards}
     end.
 
 %% @doc update a list of docs
@@ -212,9 +212,9 @@ update_doc(DbName, Doc, Options) ->
 update_docs(DbName, Docs, Options) ->
     try
         fabric_doc_update:go(dbname(DbName), docs(Docs), opts(Options)) of
-        {ok, Results} ->
-            {ok, Results};
-        {accepted, Results} ->
+        {ok, Results, EncShards} ->
+            {ok, Results, EncShards};
+        {accepted, Results, _EncShards} ->
             {accepted, Results};
         Error ->
             throw(Error)
@@ -239,16 +239,16 @@ att_receiver(Req, Length) ->
 %%      also be passed to further constrain the query. See <a href=
 %%      "http://wiki.apache.org/couchdb/HTTP_Document_API#All_Documents">
 %%      all_docs</a> for details
--spec all_docs(dbname(), callback(), [] | tuple(), #view_query_args{}) ->
+-spec all_docs(dbname(), callback(), [] | tuple(), #view_query_args{}, []) ->
     {ok, [any()]}.
-all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs) when
+all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs, EncShards) when
         is_function(Callback, 2) ->
-    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Callback, Acc0);
+    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Callback, Acc0, EncShards);
 
 %% @doc convenience function that takes a keylist rather than a record
 %% @equiv all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs))
-all_docs(DbName, Callback, Acc0, QueryArgs) ->
-    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs)).
+all_docs(DbName, Callback, Acc0, QueryArgs, EncShards) ->
+    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs), EncShards).
 
 
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
@@ -270,16 +270,16 @@ query_view(DbName, DesignName, ViewName) ->
 %%                     ViewName, fun default_callback/2, [], QueryArgs)
 query_view(DbName, DesignName, ViewName, QueryArgs) ->
     Callback = fun default_callback/2,
-    query_view(DbName, DesignName, ViewName, Callback, [], QueryArgs).
+    query_view(DbName, DesignName, ViewName, Callback, [], QueryArgs, "").
 
 %% @doc execute a given view.
 %%      There are many additional query args that can be passed to a view,
 %%      see <a href="http://wiki.apache.org/couchdb/HTTP_view_API#Querying_Options">
 %%      query args</a> for details.
 -spec query_view(dbname(), #doc{} | binary(), iodata(), callback(), any(),
-        #view_query_args{}) ->
+        #view_query_args{}, any()) ->
     any().
-query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
+query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs, EncShards) ->
     Db = dbname(DbName), View = name(ViewName),
     case is_reduce_view(Db, Design, View, QueryArgs) of
     true ->
@@ -287,7 +287,7 @@ query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
     false ->
         Mod = fabric_view_map
     end,
-    Mod:go(Db, Design, View, QueryArgs, Callback, Acc0).
+    Mod:go(Db, Design, View, QueryArgs, Callback, Acc0, EncShards).
 
 %% @doc retrieve info about a view group, disk size, language, whether compaction
 %%      is running and so forth
@@ -328,7 +328,7 @@ design_docs(DbName) ->
     ({error, Reason}, _Acc) ->
         {error, Reason}
     end,
-    fabric:all_docs(dbname(DbName), Callback, [], QueryArgs).
+    fabric:all_docs(dbname(DbName), Callback, [], QueryArgs, "").
 
 %% @doc forces a reload of validation functions, this is performed after
 %%      design docs are update

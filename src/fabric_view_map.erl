@@ -14,15 +14,32 @@
 
 -module(fabric_view_map).
 
--export([go/6]).
+-export([go/7]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, GroupId, View, Args, Callback, Acc0) when is_binary(GroupId) ->
+go(DbName, GroupId, View, Args, Callback, Acc0, EncShards) when is_binary(GroupId) ->
     {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, []),
-    go(DbName, DDoc, View, Args, Callback, Acc0);
+    go(DbName, DDoc, View, Args, Callback, Acc0, EncShards);
+
+go(DbName, DDoc, View, #view_query_args{stale=Stale, extra=Extra}=Args, Callback, Acc0, EncShards) ->
+    AllShards = fabric_view:get_shards(DbName, Args),
+    PrefShardsSeqs =
+        if (Stale == ok orelse Stale == update_after) ->
+            % stale trumps as we use primary shards
+            [];
+           true ->
+            fabric_util:process_enc_shards(EncShards, DbName)
+        end,
+    Shards = fabric_util:remove_non_preferred_shards(PrefShardsSeqs, AllShards),
+    Workers =
+    lists:map(fun({#shard{node=Node, name=ShardName} = Shard, DbSeq}) ->
+        NewExtra = lists:keystore(curr_seq, 1, Extra, {curr_seq, DbSeq}),
+        Ref = rexi:cast(Node, {fabric_rpc, map_view, [ShardName, DDoc, View, Args#view_query_args{extra=NewExtra}]}),
+        Shard#shard{ref = Ref}
+    end, Shards),
 
 go(DbName, DDoc, View, Args, Callback, Acc0) ->
     Shards = fabric_view:get_shards(DbName, Args),
@@ -67,56 +84,79 @@ handle_message({rexi_EXIT, Reason}, Worker, State) ->
         {error, Resp}
     end;
 
-handle_message({total_and_offset, Tot, Off}, {Worker, From}, State) ->
+handle_message({total_and_offset, Tot, Off, DbSeq}, {Worker, From}, State0) ->
     #collector{
         callback = Callback,
         counters = Counters0,
         total_rows = Total0,
         offset = Offset0,
-        user_acc = AccIn
-    } = State,
+        user_acc = AccIn,
+        seqs_sent = SeqsSent
+    } = State0,
     case fabric_dict:lookup_element(Worker, Counters0) of
     undefined ->
         % this worker lost the race with other partition copies, terminate
         gen_server:reply(From, stop),
-        {ok, State};
-    0 ->
+        {ok, State0};
+    _ ->
         gen_server:reply(From, ok),
         Counters1 = fabric_dict:update_counter(Worker, 1, Counters0),
         Counters2 = fabric_view:remove_overlapping_shards(Worker, Counters1),
+        State1 = fabric_util:update_seqs(DbSeq, Worker, State0),
         Total = Total0 + Tot,
         Offset = Offset0 + Off,
         case fabric_dict:any(0, Counters2) of
         true ->
-            {ok, State#collector{
+            {ok, State1#collector{
                 counters = Counters2,
                 total_rows = Total,
                 offset = Offset
             }};
         false ->
-            FinalOffset = erlang:min(Total, Offset+State#collector.skip),
-            {Go, Acc} = Callback({total_and_offset, Total, FinalOffset}, AccIn),
-            {Go, State#collector{
+            FinalOffset = erlang:min(Total, Offset+State1#collector.skip),
+            case SeqsSent of
+            true ->
+                Msg = {total_and_offset,
+                       Total, FinalOffset};
+            false ->
+                Msg = {total_and_offset, Total,
+                       FinalOffset, fabric_util:pack(State1#collector.seqs)}
+            end,
+            {Go, Acc} = Callback(Msg, AccIn),
+            {Go, State1#collector{
                 counters = fabric_dict:decrement_all(Counters2),
                 total_rows = Total,
                 offset = FinalOffset,
-                user_acc = Acc
+                user_acc = Acc,
+                seqs_sent = true
             }}
         end
     end;
 
-handle_message(#view_row{}, {_, _}, #collector{limit=0} = State) ->
+handle_message({#view_row{}, _DbSeq}, {_, _}, #collector{limit=0} = State) ->
     #collector{callback=Callback} = State,
     {_, Acc} = Callback(complete, State#collector.user_acc),
     {stop, State#collector{user_acc=Acc}};
 
-handle_message(#view_row{} = Row, {_,From}, #collector{sorted=false} = St) ->
-    #collector{callback=Callback, user_acc=AccIn, limit=Limit} = St,
-    {Go, Acc} = Callback(fabric_view:transform_row(Row), AccIn),
+handle_message(#view_row{}=Row, {Worker,From}, #collector{sorted=false}=St) ->
+    #collector{
+        callback = Calback,
+        user_acc = AccIn,
+        limit = Limit,
+        seqs_sent = Sent
+    } = St,
+    case Sent of
+        true ->
+            {Go, Acc} = Callback(fabric_view:transform(Row), AccIn);
+        false ->
+            Seqs = St2#collector.seqs,
+            {Go, Acc} = Callback({fabric_view:transform_row(Row),
+                    fabric_util:pack(Seqs)}, AccIn)
+    end,
     rexi:stream_ack(From),
-    {Go, St#collector{user_acc=Acc, limit=Limit-1}};
+    {Go, St#collector{user_acc=Acc, limit=Limit-1, seqs_sent=true}};
 
-handle_message(#view_row{} = Row, {Worker, From}, State) ->
+handle_message({#view_row{} = Row, DbSeq}, {Worker, From}, State) ->
     #collector{
         query_args = #view_query_args{direction=Dir},
         counters = Counters0,
@@ -126,7 +166,8 @@ handle_message(#view_row{} = Row, {Worker, From}, State) ->
     Rows = merge_row(Dir, KeyDict, Row#view_row{worker={Worker, From}}, Rows0),
     Counters1 = fabric_dict:update_counter(Worker, 1, Counters0),
     State1 = State#collector{rows=Rows, counters=Counters1},
-    fabric_view:maybe_send_row(State1);
+    State2 = fabric_util:update_seqs(DbSeq, Worker, State1),
+    fabric_view:maybe_send_row(State2);
 
 handle_message(complete, Worker, State) ->
     Counters = fabric_dict:update_counter(Worker, 1, State#collector.counters),

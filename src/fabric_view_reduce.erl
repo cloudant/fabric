@@ -14,26 +14,41 @@
 
 -module(fabric_view_reduce).
 
--export([go/6]).
+-export([go/7]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, GroupId, View, Args, Callback, Acc0) when is_binary(GroupId) ->
+go(DbName, GroupId, View, Args, Callback, Acc0, EncShards) when is_binary(GroupId) ->
     {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, []),
-    go(DbName, DDoc, View, Args, Callback, Acc0);
+    go(DbName, DDoc, View, Args, Callback, Acc0, EncShards);
 
-go(DbName, DDoc, VName, Args, Callback, Acc0) ->
+go(DbName, DDoc, VName, Args, Callback, Acc0, EncShards) ->
+   #view_query_args{
+       stale = Stale,
+       extra = Extra
+    } = Args
+    AllShards = fabric_view:get_shards(DbName, Args),
+    PreferredShards = if (Stale == ok orelse Stale == update_after) ->
+        % stale trumps as we use primary shards
+        [];
+    true ->
+        fabric_util:process_enc_shards(EncShards, DbName)
+    end,
+    Shards = fabric_util:remove_non_preferred_shards(
+        PreferredShards, AllShards),
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     Lang = couch_view_group:get_language(Group),
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
-    Workers = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
-        Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,Args]}),
+    Workers = lists:map(fun({#shard{name=Name, node=N} = Shard, DbSeq}) ->
+        NewExtra = lists:keystore(curr_seq, 1, Extra, {curr_seq, DbSeq}),
+        Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,
+                Args#view_query_args{extra=NewExtra}]}),
         Shard#shard{ref = Ref}
-    end, fabric_view:get_shards(DbName, Args)),
+    end, Shards),
     RexiMon = fabric_util:create_monitors(Workers),
     #view_query_args{limit = Limit, skip = Skip} = Args,
     OsProc = case os_proc_needed(RedSrc) of
@@ -85,7 +100,7 @@ handle_message({rexi_EXIT, Reason}, Worker, State) ->
         {error, Resp}
     end;
 
-handle_message(#view_row{key=Key} = Row, {Worker, From}, State) ->
+handle_message({#view_row{key=Key} = Row, DbSeq}, {Worker, From}, State) ->
     #collector{counters = Counters0, rows = Rows0} = State,
     case fabric_dict:lookup_element(Worker, Counters0) of
     undefined ->
@@ -98,7 +113,8 @@ handle_message(#view_row{key=Key} = Row, {Worker, From}, State) ->
         % TODO time this call, if slow don't do it every time
         C2 = fabric_view:remove_overlapping_shards(Worker, C1),
         State1 = State#collector{rows=Rows, counters=C2},
-        fabric_view:maybe_send_row(State1)
+        State2 = fabric_util:update_seqs(DbSeq, Worker, State1),
+        fabric_view:maybe_send_row(State2)
     end;
 
 handle_message(complete, Worker, #collector{counters = Counters0} = State) ->

@@ -14,15 +14,18 @@
 
 -module(fabric_view_all_docs).
 
--export([go/4]).
+-export([go/4, go/5]).
 -export([open_doc/3]). % exported for spawn
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
-    Workers = fabric_util:submit_jobs(mem3:shards(DbName),all_docs,[QueryArgs]),
+go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0, EncShards) ->
+    PreferredShards = fabric_util:process_enc_shards(EncShards, DbName),
+    Shards0 = fabric_util:remove_non_preferred_shards(PreferredShards, mem3:shards(DbName)),
+    {Shards, _Seqs} = lists:unzip(Shards0),
+    Workers = fabric_util:submit_jobs(Shards,all_docs,[QueryArgs]),
     #view_query_args{limit = Limit, skip = Skip} = QueryArgs,
     State = #collector{
         query_args = QueryArgs,
@@ -30,7 +33,8 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
         counters = fabric_dict:init(Workers, 0),
         skip = Skip,
         limit = Limit,
-        user_acc = Acc0
+        user_acc = Acc0,
+        seqs_sent = true
     },
     RexiMon = fabric_util:create_monitors(Workers),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3,
@@ -44,7 +48,7 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
     after
         rexi_monitor:stop(RexiMon),
         fabric_util:cleanup(Workers)
-    end;
+    end.
 
 
 go(DbName, QueryArgs, Callback, Acc0) ->

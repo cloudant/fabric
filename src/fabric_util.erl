@@ -16,7 +16,9 @@
 
 -export([submit_jobs/3, submit_jobs/4, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
         update_counter/3, remove_ancestors/2, create_monitors/1, kv/2,
-        remove_down_workers/2]).
+        update_seqs/3,
+        remove_down_workers/2, remove_non_preferred_shards/2,
+        pack/1, process_enc_shards/2]).
 -export([request_timeout/0]).
 
 -include("fabric.hrl").
@@ -142,6 +144,84 @@ remove_ancestors([Error | Tail], Acc) ->
 create_monitors(Shards) ->
     MonRefs = lists:usort([{rexi_server, N} || #shard{node=N} <- Shards]),
     rexi_monitor:start(MonRefs).
+
+remove_non_preferred_shards(PreferredShards, Shards) ->
+    %% the preferred shards are the good ones. Remove shards that
+    %% are in the same range but different nodes
+    lists:foldl(fun(Shard, Acc) ->
+                    case check_shard(Shard, PreferredShards) of
+                    -1 ->
+                        Acc;
+                    DbSeq ->
+                        [{Shard, DbSeq} | Acc]
+                    end
+                end, [], Shards).
+
+check_shard(_, []) ->
+    0;
+check_shard(#shard{name=Name, node=Node}=Shard, [{#shard{name=Name2, node=Node2}, DbSeq} | Rest]) ->
+    case Name =:= Name2 of
+    true ->
+        case Node =:= Node2 of
+        true ->
+            DbSeq;
+        false ->
+            -1
+        end;
+    _ ->
+        check_shard(Shard, Rest)
+    end.
+
+
+process_enc_shards(EncShards, DbName) ->
+    case EncShards of
+    [] -> [];
+    _ ->
+        unpack_seqs(EncShards, DbName)
+    end.
+
+pack(Responders) ->
+    ShardList = [{N,R,DbSeq} || {#shard{node=N, range=R}, DbSeq} <- Responders],
+    couch_util:encodeBase64Url(term_to_binary(ShardList, [compressed])).
+
+unpack_seqs(Packed, DbName) ->
+    NodeRangeSeqs = unpack_and_merge(Packed),
+    lists:map(fun({Node, Range, DbSeq}) ->
+                  {ok, Shard} = mem3:get_shard(DbName, Node, Range),
+                  {Shard, DbSeq}
+              end,
+              NodeRangeSeqs).
+
+unpack_and_merge(PackedNRS) ->
+    NodeRangeSeqs =
+        lists:foldl(fun(NRQ, Acc) ->
+                        binary_to_term(couch_util:decodeBase64Url(NRQ)) ++ Acc
+                    end,[],PackedNRS),
+    MergedList =
+        lists:foldl(fun({Node,Range,Seq}, Acc) ->
+                        [merge({Node,Range,Seq}, NodeRangeSeqs) | Acc]
+                    end,[],NodeRangeSeqs),
+    lists:usort(MergedList).
+
+merge(NRS, []) ->
+    NRS;
+
+merge({Node, Range, Seq}, [{Node2, Range2, Seq2} | Rest]) ->
+    case Node =:= Node2 andalso Range =:= Range2 of
+    true ->
+        {Node, Range, erlang:max(Seq,Seq2)};
+    false ->
+        merge({Node, Range, Seq}, Rest)
+    end.
+
+update_seqs(DbSeq, Worker, #collector{seqs=Seqs}=State) ->
+    case lists:member({Worker, DbSeq}, Seqs) of
+    true ->
+        NewSeqs = Seqs;
+    false ->
+        NewSeqs = [{Worker, DbSeq} | Seqs]
+    end,
+    State#collector{seqs=NewSeqs}.
 
 %% verify only id and rev are used in key.
 update_counter_test() ->

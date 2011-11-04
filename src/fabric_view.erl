@@ -108,7 +108,9 @@ maybe_send_row(State) ->
         counters = Counters,
         skip = Skip,
         limit = Limit,
-        user_acc = AccIn
+        user_acc = AccIn,
+        seqs = Seqs,
+        seqs_sent = SeqsSent
     } = State,
     case fabric_dict:any(0, Counters) of
     true ->
@@ -118,11 +120,18 @@ maybe_send_row(State) ->
         {_, NewState} when Skip > 0 ->
             maybe_send_row(NewState#collector{skip=Skip-1});
         {Row, NewState} ->
-            case Callback(transform_row(possibly_embed_doc(NewState,Row)), AccIn) of
+            case SeqsSent of
+            true ->
+                Msg = transform_row(possibly_embed_doc(NewState,Row));
+            false ->
+                Msg = {transform_row(possibly_embed_doc(NewState,Row)),
+                       fabric_util:pack(Seqs)}
+            end,
+            case Callback(Msg, AccIn) of
             {stop, Acc} ->
-                {stop, NewState#collector{user_acc=Acc, limit=Limit-1}};
+                {stop, NewState#collector{user_acc=Acc, limit=Limit-1, seqs_sent=true}};
             {ok, Acc} ->
-                maybe_send_row(NewState#collector{user_acc=Acc, limit=Limit-1})
+                maybe_send_row(NewState#collector{user_acc=Acc, limit=Limit-1, seqs_sent=true})
             end
         catch complete ->
             {_, Acc} = Callback(complete, AccIn),
@@ -343,3 +352,4 @@ mk_shards(NoNodes,Range,Shards) ->
     NodeName = list_to_atom("node-" ++ integer_to_list(NoNodes)),
     mk_shards(NoNodes-1,Range,
               [#shard{name=NodeName, node=NodeName, range=Range} | Shards]).
+
