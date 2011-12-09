@@ -36,6 +36,7 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
                 Args,
                 Callback,
                 Since,
+                0,
                 Acc,
                 Timeout
             )
@@ -50,6 +51,7 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
 go(DbName, "normal", Options, Callback, Acc0) ->
     Args = make_changes_args(Options),
     Since = get_start_seq(DbName, Args),
+    Until = get_end_seq(DbName, Args),
     case validate_start_seq(DbName, Since) of
     ok ->
         {ok, Acc} = Callback(start, Acc0),
@@ -58,6 +60,7 @@ go(DbName, "normal", Options, Callback, Acc0) ->
             Args,
             Callback,
             Since,
+            Until,
             Acc,
             5000
         ),
@@ -66,9 +69,9 @@ go(DbName, "normal", Options, Callback, Acc0) ->
         Callback(Error, Acc0)
     end.
 
-keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout) ->
+keep_sending_changes(DbName, Args, Callback, Seqs, _, AccIn, Timeout) ->
     #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} = Args,
-    {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout),
+    {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, 0, AccIn, Timeout),
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
     LastSeq = pack_seqs(NewSeqs),
     if Limit > Limit2, Feed == "longpoll" ->
@@ -84,29 +87,32 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout) ->
                 Args#changes_args{limit=Limit2},
                 Callback,
                 LastSeq,
+                0,
                 AccTimeout,
                 Timeout
             )
         end
     end.
 
-send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
+send_changes(DbName, ChangesArgs, Callback, SincePackedSeqs, UntilPackedSeqs, AccIn, Timeout) ->
     AllShards = mem3:shards(DbName),
-    Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, Seq}) ->
+    Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, SSeq, ESeq}) ->
+                             io:format("the range is ~p ~p ~n",[SSeq, ESeq]),
         case lists:member(Shard, AllShards) of
         true ->
-            Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,Seq]}),
-            [{Shard#shard{ref = Ref}, Seq}];
+            Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,SSeq,ESeq]}),
+            [{Shard#shard{ref = Ref}, SSeq}];
         false ->
             % Find some replacement shards to cover the missing range
             % TODO It's possible in rare cases of shard merging to end up
             % with overlapping shard ranges from this technique
             lists:map(fun(#shard{name=Name2, node=N2} = NewShard) ->
-                Ref = rexi:cast(N2, {fabric_rpc, changes, [Name2,ChangesArgs,0]}),
+                Ref = rexi:cast(N2, {fabric_rpc, changes, [Name2,ChangesArgs,0,0]}),
                 {NewShard#shard{ref = Ref}, 0}
             end, find_replacement_shards(Shard, AllShards))
         end
-    end, unpack_seqs(PackedSeqs, DbName)),
+    end, create_ranges(unpack_seqs(SincePackedSeqs, DbName),
+                        unpack_seqs(UntilPackedSeqs, DbName), [])),
     {Workers, _} = lists:unzip(Seqs),
     RexiMon = fabric_util:create_monitors(Workers),
     State = #collector{
@@ -216,6 +222,9 @@ get_start_seq(DbName, #changes_args{dir=rev}) ->
         fun collect_update_seqs/3, fabric_dict:init(Workers, -1)),
     Since.
 
+get_end_seq(_DbName, #changes_args{until=Until}) ->
+    Until.
+
 collect_update_seqs(Seq, Shard, Counters) when is_integer(Seq) ->
     case fabric_dict:lookup_element(Shard, Counters) of
     undefined ->
@@ -231,6 +240,19 @@ collect_update_seqs(Seq, Shard, Counters) when is_integer(Seq) ->
             {stop, pack_seqs(C2)}
         end
     end.
+
+create_ranges(_,[],Acc) ->
+    Acc;
+create_ranges([{#shard{name=Name, node=N}=Shard1, Seq1}|Rest1],
+              [{#shard{name=Name, node=N}, Seq2}|Rest2],Acc) ->
+    io:format("a good match ~p ~p ~p ~n",[Shard1, Seq1, Seq2]),
+    create_ranges(Rest1, Rest2,[{Shard1, Seq1, Seq2} | Acc]);
+
+create_ranges([_|Rest1],
+              [{Shard2, Seq2}|Rest2],Acc) ->
+    io:format("no match really ~p ~p ~n",[Shard2, Seq2]),
+    create_ranges(Rest1, [{Shard2, Seq2}|Rest2], Acc).
+
 
 pack_seqs(Workers) ->
     SeqList = [{N,R,S} || {#shard{node=N, range=R}, S} <- Workers],

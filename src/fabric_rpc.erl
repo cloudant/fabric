@@ -17,7 +17,7 @@
 -export([get_db_info/1, get_doc_count/1, get_update_seq/1]).
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
     update_docs/3]).
--export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
+-export([all_docs/2, changes/4, map_view/4, reduce_view/4, group_info/2]).
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
 
@@ -72,16 +72,16 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
     {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, Options),
     final_response(Total, Acc#view_acc.offset).
 
-changes(DbName, Args, StartSeq) ->
+changes(DbName, Args, StartSeq, EndSeq) ->
     erlang:put(io_priority, {interactive, DbName}),
     #changes_args{dir=Dir} = Args,
     case get_or_create_db(DbName, []) of
     {ok, Db} ->
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args},
+        Acc0 = {Db, {StartSeq, EndSeq}, Args},
         try
-            {ok, {_, LastSeq, _}} =
+            {ok, {_, {LastSeq,EndSeq}, _}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
             rexi:reply({complete, LastSeq})
         after
@@ -405,21 +405,25 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
         exit(timeout)
     end.
 
-changes_enumerator(DocInfo, {Db, _Seq, Args}) ->
+changes_enumerator(DocInfo, {Db, {SSeq, ESeq}, Args}) ->
     #changes_args{
         include_docs = IncludeDocs,
         filter = Acc,
         conflicts = Conflicts
     } = Args,
     #doc_info{high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
-    case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
-    [] ->
-        {ok, {Db, Seq, Args}};
-    Results ->
-        Opts = if Conflicts -> [conflicts]; true -> [] end,
-        ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
-        Go = rexi:sync_reply(ChangesRow),
-        {Go, {Db, Seq, Args}}
+    if (ESeq == 0) orelse (Seq =< ESeq) ->
+        case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
+        [] ->
+            {ok, {Db, {Seq, ESeq}, Args}};
+        Results ->
+            Opts = if Conflicts -> [conflicts]; true -> [] end,
+            ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
+            Go = rexi:sync_reply(ChangesRow),
+            {Go, {Db, {Seq, ESeq}, Args}}
+        end;
+    true ->
+        {stop, {Db, {Seq, ESeq}, Args}}
     end.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
