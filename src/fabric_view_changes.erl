@@ -245,12 +245,10 @@ create_ranges(_,[],Acc) ->
     Acc;
 create_ranges([{#shard{name=Name, node=N}=Shard1, Seq1}|Rest1],
               [{#shard{name=Name, node=N}, Seq2}|Rest2],Acc) ->
-    io:format("a good match ~p ~p ~p ~n",[Shard1, Seq1, Seq2]),
     create_ranges(Rest1, Rest2,[{Shard1, Seq1, Seq2} | Acc]);
 
 create_ranges([_|Rest1],
               [{Shard2, Seq2}|Rest2],Acc) ->
-    io:format("no match really ~p ~p ~n",[Shard2, Seq2]),
     create_ranges(Rest1, [{Shard2, Seq2}|Rest2], Acc).
 
 
