@@ -325,6 +325,9 @@ cleanup_index_files() ->
 %% @doc clean up index files for a specific db
 -spec cleanup_index_files(dbname()) -> ok.
 cleanup_index_files(DbName) ->
+    Node = node(),
+    ViewDir = couch_config:get("couchdb", "view_index_dir"),
+
     {ok, DesignDocs} = fabric:design_docs(DbName),
 
     ActiveSigs = lists:map(fun(#doc{id = GroupId}) ->
@@ -332,17 +335,36 @@ cleanup_index_files(DbName) ->
         binary_to_list(couch_util:get_value(signature, Info))
     end, [couch_doc:from_json_obj(DD) || DD <- DesignDocs]),
 
-    FileList = filelib:wildcard([couch_config:get("couchdb", "view_index_dir"),
-        "/.shards/*/", couch_util:to_list(dbname(DbName)), ".[0-9]*_design/*"]),
+    LocalShards = lists:foldl(fun(Shard, AccIn) ->
+        case Shard#shard.node of
+        Node -> [Shard | AccIn];
+        _ -> AccIn
+        end
+    end, [], mem3:shards(dbname(DbName))),
 
-    DeleteFiles = if ActiveSigs =:= [] -> FileList; true ->
-        {ok, RegExp} = re:compile([$(, string:join(ActiveSigs, "|"), $)]),
-        lists:filter(fun(FilePath) ->
-            re:run(FilePath, RegExp, [{capture, none}]) == nomatch
-        end, FileList)
-    end,
-    [file:delete(File) || File <- DeleteFiles],
-    ok.
+    FileInfos = lists:foldl(fun(#shard{name=Name}, AccIn0) ->
+        ShardName = couch_util:to_list(Name),
+        Pattern = ViewDir ++ "/." ++ ShardName ++ "_design/*",
+        Files = filelib:wildcard(Pattern),
+        lists:foldl(fun(Path, AccIn1) ->
+            Sig = filename:rootname(filename:basename(Path)),
+            [{ShardName, Sig, Path} | AccIn1]
+        end, AccIn0, Files)
+    end, [], LocalShards),
+
+    Deleted = lists:foldl(fun({ShardName, Sig, Path}, AccIn) ->
+        case lists:member(Sig, ActiveSigs) of
+        true ->
+            AccIn;
+        false ->
+            file:delete(Path),
+            [{ShardName, list_to_binary(Sig)} | AccIn]
+        end
+    end, [], FileInfos),
+
+    {ok, Deleted}.
+
+
 
 %% some simple type validation and transcoding
 
