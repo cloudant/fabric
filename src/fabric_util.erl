@@ -16,7 +16,7 @@
 
 -export([submit_jobs/3, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
         update_counter/3, remove_ancestors/2, create_monitors/1, kv/2,
-        remove_down_workers/2]).
+        safe_call/3, remove_down_workers/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -137,6 +137,18 @@ remove_ancestors([Error | Tail], Acc) ->
 create_monitors(Shards) ->
     MonRefs = lists:usort([{rexi_server, N} || #shard{node=N} <- Shards]),
     rexi_monitor:start(MonRefs).
+
+safe_call(M, F, A) ->
+    {_, Ref} = spawn_monitor(fun() -> exit(apply(M, F, A)) end),
+    Result = receive {'DOWN', Ref, _, _, Res} -> Res end,
+    case Result of
+    {{nocatch, Exception}, _Reason} ->
+        % Exceptions from spawned processes are swallowed and returned, rethrow
+        throw(Exception);
+    Else ->
+        Else
+    end.
+
 
 %% verify only id and rev are used in key.
 update_counter_test() ->
