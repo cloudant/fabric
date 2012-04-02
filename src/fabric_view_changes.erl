@@ -28,8 +28,8 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
     case validate_start_seq(DbName, Since) of
     ok ->
         {ok, Acc} = Callback(start, Acc0),
-        Notifiers = start_update_notifiers(DbName),
         {Timeout, _} = couch_changes:get_changes_timeout(Args, Callback),
+        WaitPid = wait_for_updates(self(), DbName, Timeout),
         try
             keep_sending_changes(
                 DbName,
@@ -37,11 +37,11 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
                 Callback,
                 Since,
                 Acc,
-                Timeout
+                Timeout,
+                WaitPid
             )
         after
-            stop_update_notifiers(Notifiers),
-            couch_changes:get_rest_db_updated()
+            stop_monitoring(WaitPid)
         end;
     Error ->
         Callback(Error, Acc0)
@@ -66,7 +66,7 @@ go(DbName, "normal", Options, Callback, Acc0) ->
         Callback(Error, Acc0)
     end.
 
-keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout) ->
+keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, WaitPid) ->
     #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} = Args,
     {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout),
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
@@ -74,7 +74,7 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout) ->
     if Limit > Limit2, Feed == "longpoll" ->
         Callback({stop, LastSeq}, AccOut);
     true ->
-        case {Heartbeat, wait_db_updated(Timeout)} of
+        case {Heartbeat, wait_db_updated(WaitPid)} of
         {undefined, timeout} ->
             Callback({stop, LastSeq}, AccOut);
         _ ->
@@ -85,7 +85,8 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout) ->
                 Callback,
                 LastSeq,
                 AccTimeout,
-                Timeout
+                Timeout,
+                WaitPid
             )
         end
     end.
@@ -272,6 +273,44 @@ do_unpack_seqs(Opaque, DbName) ->
         end
     end, binary_to_term(couch_util:decodeBase64Url(Opaque))).
 
+wait_for_updates(Parent, DbName, Timeout) ->
+    spawn_link(fun() ->
+                   Notifiers = start_update_notifiers(DbName),
+                   wait_loop(Parent, Timeout, unset),
+                   stop_update_notifiers(Notifiers)
+               end).
+
+stop_monitoring(WaitPid) ->
+    WaitPid ! done.
+
+wait_loop(Parent, Timeout, State) ->
+    % State transitions
+    % unset -> (updated | waiting)
+    % updated -> (unset | updated)
+    % waiting -> unset
+    receive
+    db_updated when State == waiting ->
+        Parent ! updated,
+        wait_loop(Parent, Timeout, unset);
+    db_updated when State == unset orelse State == updated ->
+        wait_loop(Parent, Timeout, updated);
+    get_state when State == unset  ->
+        wait_loop(Parent, Timeout, waiting);
+    get_state ->
+        Parent ! State,
+        wait_loop(Parent, Timeout, unset);
+    done ->
+        ok
+    after Timeout ->
+        case State of
+            waiting ->
+                Parent ! timeout,
+                wait_loop(Parent, Timeout, unset);
+            unset ->
+                wait_loop(Parent, Timeout, State)
+        end
+    end.
+
 start_update_notifiers(DbName) ->
     lists:map(fun(#shard{node=Node, name=Name}) ->
         {Node, rexi:cast(Node, {?MODULE, start_update_notifier, [Name]})}
@@ -305,9 +344,12 @@ find_replacement_shards(#shard{range=Range}, AllShards) ->
     % TODO make this moar betta -- we might have split or merged the partition
     [Shard || Shard <- AllShards, Shard#shard.range =:= Range].
 
-wait_db_updated(Timeout) ->
-    receive db_updated -> couch_changes:get_rest_db_updated()
-    after Timeout -> timeout end.
+wait_db_updated(WaitPid) ->
+    WaitPid ! get_state,
+    receive
+    Any ->
+        Any
+    end.
 
 validate_start_seq(DbName, Seq) ->
     try unpack_seqs(Seq, DbName) of _Any ->
