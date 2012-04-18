@@ -14,7 +14,7 @@
 
 -module(fabric_view_changes).
 
--export([go/5, start_update_notifier/1, pack_seqs/1]).
+-export([go/5, pack_seqs/1]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -29,7 +29,7 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
     ok ->
         {ok, Acc} = Callback(start, Acc0),
         {Timeout, _} = couch_changes:get_changes_timeout(Args, Callback),
-        WaitPid = wait_for_updates(self(), DbName, Timeout),
+        WaitPid = fabric_db_update_listener:go(self(), DbName, Timeout),
         try
             keep_sending_changes(
                 DbName,
@@ -273,61 +273,15 @@ do_unpack_seqs(Opaque, DbName) ->
         end
     end, binary_to_term(couch_util:decodeBase64Url(Opaque))).
 
-wait_for_updates(Parent, DbName, Timeout) ->
-    spawn_link(fun() ->
-                   Notifiers = start_update_notifiers(DbName),
-                   wait_loop(Parent, Timeout, unset),
-                   stop_update_notifiers(Notifiers)
-               end).
-
 stop_monitoring(WaitPid) ->
     WaitPid ! done.
 
-wait_loop(Parent, Timeout, State) ->
-    % State transitions
-    % unset -> (updated | waiting)
-    % updated -> (unset | updated)
-    % waiting -> unset
+wait_db_updated(WaitPid) ->
+    WaitPid ! get_state,
     receive
-    db_updated when State == waiting ->
-        Parent ! updated,
-        wait_loop(Parent, Timeout, unset);
-    db_updated when State == unset orelse State == updated ->
-        wait_loop(Parent, Timeout, updated);
-    get_state when State == unset  ->
-        wait_loop(Parent, Timeout, waiting);
-    get_state ->
-        Parent ! State,
-        wait_loop(Parent, Timeout, unset);
-    done ->
-        ok
-    after Timeout ->
-        case State of
-            waiting ->
-                Parent ! timeout,
-                wait_loop(Parent, Timeout, unset);
-            unset ->
-                wait_loop(Parent, Timeout, State)
-        end
+    Any ->
+        Any
     end.
-
-start_update_notifiers(DbName) ->
-    lists:map(fun(#shard{node=Node, name=Name}) ->
-        {Node, rexi:cast(Node, {?MODULE, start_update_notifier, [Name]})}
-    end, mem3:shards(DbName)).
-
-% rexi endpoint
-start_update_notifier(DbName) ->
-    {Caller, _} = get(rexi_from),
-    Fun = fun({_, X}) when X == DbName -> Caller ! db_updated; (_) -> ok end,
-    Id = {couch_db_update_notifier, make_ref()},
-    ok = gen_event:add_sup_handler(couch_db_update, Id, Fun),
-    receive {gen_event_EXIT, Id, Reason} ->
-        rexi:reply({gen_event_EXIT, DbName, Reason})
-    end.
-
-stop_update_notifiers(Notifiers) ->
-    [rexi:kill(Node, Ref) || {Node, Ref} <- Notifiers].
 
 changes_row(#change{key=Seq, id=Id, value=Value, deleted=true, doc=Doc}, true) ->
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}, {deleted, true}, {doc, Doc}]}};
@@ -343,13 +297,6 @@ changes_row(#change{key=Seq, id=Id, value=Value}, false) ->
 find_replacement_shards(#shard{range=Range}, AllShards) ->
     % TODO make this moar betta -- we might have split or merged the partition
     [Shard || Shard <- AllShards, Shard#shard.range =:= Range].
-
-wait_db_updated(WaitPid) ->
-    WaitPid ! get_state,
-    receive
-    Any ->
-        Any
-    end.
 
 validate_start_seq(DbName, Seq) ->
     try unpack_seqs(Seq, DbName) of _Any ->
