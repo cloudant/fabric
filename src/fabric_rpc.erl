@@ -31,6 +31,7 @@
     include_docs,
     doc_info = nil,
     offset = nil,
+    current_seq = 0,
     total_rows,
     reduce_fun = fun couch_db:enum_docs_reduce_to_count/1,
     group_level = 0
@@ -68,7 +69,7 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
         {EndKeyType, if is_binary(EndKey) -> EndKey; true -> EndDocId end}
     ],
     {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, Options),
-    final_response(Total, Acc#view_acc.offset).
+    final_response(Total, Acc#view_acc.offset, Acc#view_acc.current_seq).
 
 changes(DbName, Args, StartSeq) ->
     erlang:put(io_priority, {interactive, DbName}),
@@ -114,6 +115,7 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
         include_docs = IncludeDocs,
         limit = Limit+Skip,
         total_rows = Total,
+        current_seq = Group#group.current_seq,
         reduce_fun = fun couch_view:reduce_to_count/1
     },
     case Keys of
@@ -129,7 +131,7 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
             Out
         end, Acc0, Keys)
     end,
-    final_response(Total, Acc#view_acc.offset).
+    final_response(Total, Acc#view_acc.offset, Acc#view_acc.current_seq).
 
 reduce_view(DbName, Group0, ViewName, QueryArgs) ->
     erlang:put(io_priority, {interactive, DbName}),
@@ -306,11 +308,11 @@ view_fold(#full_doc_info{} = FullDocInfo, OffsetReds, Acc) ->
     #doc_info{revs=[#rev_info{deleted=true}|_]} ->
         {ok, Acc}
     end;
-view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total} = Acc) ->
+view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total, current_seq=CurrentSeq} = Acc) ->
     % calculates the offset for this shard
     #view_acc{reduce_fun=Reduce} = Acc,
     Offset = Reduce(OffsetReds),
-    case rexi:sync_reply({total_and_offset, Total, Offset}) of
+    case rexi:sync_reply({total_and_offset, Total, Offset, CurrentSeq}) of
     ok ->
         view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
     stop ->
@@ -357,15 +359,15 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
             exit(timeout)
     end.
 
-final_response(Total, nil) ->
-    case rexi:sync_reply({total_and_offset, Total, Total}) of ok ->
+final_response(Total, nil, CurrentSeq) ->
+    case rexi:sync_reply({total_and_offset, Total, Total, CurrentSeq}) of ok ->
         rexi:reply(complete);
     stop ->
         ok;
     timeout ->
         exit(timeout)
     end;
-final_response(_Total, _Offset) ->
+final_response(_Total, _Offset, _CurrentSeq) ->
     rexi:reply(complete).
 
 %% TODO: handle case of bogus group level

@@ -23,6 +23,7 @@
     blocked = [],
     total_rows = 0,
     offset = 0,
+    current_seq = [],
     rows = [],
     skip,
     limit,

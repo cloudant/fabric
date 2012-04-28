@@ -69,11 +69,12 @@ handle_message({rexi_EXIT, Reason}, Worker, State) ->
         {error, Resp}
     end;
 
-handle_message({total_and_offset, Tot, Off}, {Worker, From}, State) ->
+handle_message({total_and_offset, Tot, Off, CSeq}, {Worker, From}, State) ->
     #collector{
         callback = Callback,
         counters = Counters0,
         total_rows = Total0,
+        current_seq = CSeq0,
         offset = Offset0,
         user_acc = AccIn
     } = State,
@@ -88,21 +89,27 @@ handle_message({total_and_offset, Tot, Off}, {Worker, From}, State) ->
         Counters2 = fabric_view:remove_overlapping_shards(Worker, Counters1),
         Total = Total0 + Tot,
         Offset = Offset0 + Off,
+        CurrentSeq = [{Worker#shard.node, CSeq}|CSeq0],
         case fabric_dict:any(0, Counters2) of
         true ->
             {ok, State#collector{
                 counters = Counters2,
                 total_rows = Total,
-                offset = Offset
+                offset = Offset,
+                current_seq = CurrentSeq
             }};
         false ->
             FinalOffset = erlang:min(Total, Offset+State#collector.skip),
-            {Go, Acc} = Callback({total_and_offset, Total, FinalOffset}, AccIn),
+            SeqSum = lists:sum(element(2, lists:unzip(CurrentSeq))),
+            Opaque = couch_util:to_hex(couch_util:md5(term_to_binary(lists:sort(CurrentSeq)))),
+            FinalCurrentSeq = list_to_binary([integer_to_list(SeqSum), $-, Opaque]),
+            {Go, Acc} = Callback({total_and_offset, Total, FinalOffset, FinalCurrentSeq}, AccIn),
             {Go, State#collector{
                 counters = fabric_dict:decrement_all(Counters2),
                 total_rows = Total,
                 offset = FinalOffset,
-                user_acc = Acc
+                user_acc = Acc,
+                current_seq = CurrentSeq
             }}
         end
     end;
