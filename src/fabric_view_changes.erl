@@ -282,11 +282,9 @@ start_update_notifiers(DbName) ->
 % rexi endpoint
 start_update_notifier(DbName) ->
     {Caller, _} = get(rexi_from),
-    Fun = fun({_, X}) when X == DbName -> Caller ! db_updated; (_) -> ok end,
-    Id = {couch_db_update_notifier, make_ref()},
-    ok = gen_event:add_sup_handler(couch_db_update, Id, Fun),
-    receive {gen_event_EXIT, Id, Reason} ->
-        rexi:reply({gen_event_EXIT, DbName, Reason})
+    couch_db_events:register(DbName, Caller),
+    receive Message ->
+        rexi:reply(Message)
     end.
 
 stop_update_notifiers(Notifiers) ->
