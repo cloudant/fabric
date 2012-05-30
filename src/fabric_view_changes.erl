@@ -282,7 +282,7 @@ start_update_notifiers(DbName) ->
 % rexi endpoint
 start_update_notifier(DbName) ->
     {Caller, _} = get(rexi_from),
-    couch_db_events:register(DbName, Caller),
+    couch_db_events:register(DbName, Caller, db_updated),
     receive Message ->
         rexi:reply(Message)
     end.
