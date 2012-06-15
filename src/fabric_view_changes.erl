@@ -94,7 +94,7 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
     LiveNodes = [node() | nodes()],
     AllLiveShards = mem3:live_shards(DbName, LiveNodes),
     Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, Seq}) ->
-        case lists:member(Shard, AllLiveShards) of
+        case lists:member(Shard, AllLiveShards) orelse get(crashme) of
         true ->
             Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,Seq]}),
             [{Shard#shard{ref = Ref}, Seq}];
