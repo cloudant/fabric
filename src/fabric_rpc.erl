@@ -183,7 +183,7 @@ calculate_seqs(Db, Stale) ->
     end.
 
 maybe_update_view_group(GroupPid, LastSeq, update_after) ->
-    couch_view_group:trigger_group_update(GroupPid, LastSeq);
+    erlang:spawn(couch_view_group, request_group, [GroupPid, LastSeq]);
 maybe_update_view_group(_, _, _) ->
     ok.
 
