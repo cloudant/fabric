@@ -26,8 +26,9 @@
     get_security/2, get_all_security/1, get_all_security/2]).
 
 % Documents
--export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
-    update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
+-export([open_doc/3, open_revs/4, open_fdi/3, get_missing_revs/2,
+    get_missing_revs/3, update_doc/3, update_docs/3, purge_docs/2,
+    att_receiver/2]).
 
 % Views
 -export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
@@ -174,6 +175,15 @@ open_doc(DbName, Id, Options) ->
     {error, any(), any()}.
 open_revs(DbName, Id, Revs, Options) ->
     fabric_doc_open_revs:go(dbname(DbName), docid(Id), Revs, opts(Options)).
+
+%% @doc retrieve the full_doc_info for the given id
+-spec open_fdi(dbname(), docid(), [option()]) ->
+    {ok, [{#shard{}, #full_doc_info{}} | {not_found, missing | deleted}]} |
+    {timeout, any()} |
+    {error, any()} |
+    {error, any() | any()}.
+open_fdi(DbName, Id, Options) ->
+    fabric_doc_open_fdi:go(dbname(DbName), docid(Id), opts(Options)).
 
 %% @equiv get_missing_revs(DbName, IdsRevs, [])
 get_missing_revs(DbName, IdsRevs) ->
