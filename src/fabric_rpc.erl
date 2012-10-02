@@ -16,7 +16,7 @@
 
 -export([get_db_info/1, get_doc_count/1, get_update_seq/1]).
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
-    update_docs/3]).
+    update_docs/3, repair_doc/4, repair_doc_int/4]).
 -export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
@@ -259,6 +259,20 @@ update_docs(DbName, Docs0, Options) ->
     end,
     Docs = make_att_readers(Docs0),
     with_db(DbName, Options, {couch_db, update_docs, [Docs, Options, X]}).
+
+repair_doc(DbName, Id, RevDsts, Options) ->
+    MFA = {fabric_rpc, repair_doc_int, [Id, RevDsts, Options]},
+    with_db(DbName, Options, MFA).
+
+repair_doc_int(_Db, _Id, [], _Options) ->
+    ok;
+repair_doc_int(Db, Id, Revs, Options) ->
+    Num = erlang:min(10, length(Revs)),
+    {Curr, Next} = lists:split(Num, Revs),
+    RevDocs = couch_db:open_revs(Db, Id, Curr, []),
+    Docs = [Doc || {ok, #doc{}=Doc} <- RevDocs],
+    fabric:update_docs(Db#db.name, Docs, Options),
+    repair_doc_int(Db, Id, Next, Options).
 
 group_info(DbName, Group0) ->
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
