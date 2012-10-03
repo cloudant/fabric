@@ -99,7 +99,7 @@ create_db(DbName) ->
 %% Options can include values for q and n,
 %% for example `{q, "8"}' and `{n, "3"}', which
 %% control how many shards to split a database into
-%% and how many nodes each doc is copied to respectively.
+%% and how many nodes each doc is copied to respectively
 %%
 -spec create_db(dbname(), [option()]) -> ok | accepted | {error, atom()}.
 create_db(DbName, Options) ->
