@@ -134,10 +134,11 @@ update_quorum_met(W, Replies) ->
 
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
 group_docs_by_shard(DbName, Docs) ->
-    dict:to_list(lists:foldl(fun(#doc{id=Id} = Doc, D0) ->
+   Result =  dict:to_list(lists:foldl(fun(Doc, D0) ->
+        {Shards, NewDoc} = mem3:shards(DbName, Doc),
         lists:foldl(fun(Shard, D1) ->
-            dict:append(Shard, Doc, D1)
-        end, D0, mem3:shards(DbName,Id))
+            dict:append(Shard, NewDoc, D1)
+        end, D0, Shards)
     end, dict:new(), Docs)).
 
 append_update_replies([], [], DocReplyDict) ->

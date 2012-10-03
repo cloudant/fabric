@@ -38,10 +38,11 @@ remove_down_shards(Collector, BadNode) ->
 -spec is_progress_possible([{#shard{}, term()}]) -> boolean().
 is_progress_possible([]) ->
     false;
-is_progress_possible(Counters) ->
+is_progress_possible([{Shard1, _} | _ ] = Counters) ->
     Ranges = fabric_dict:fold(fun(#shard{range=[X,Y]}, _, A) -> [{X,Y}|A] end,
         [], Counters),
-    [{Start, Tail0} | Rest] = lists:ukeysort(1, Ranges),
+    [{Start, Tail0} | Rest] = lists:ukeysort(1, Ranges),    
+    Ringtop =  mem3_util:ringtop(Shard1#shard.dbname), 
     Result = lists:foldl(fun
     (_, fail) ->
         % we've already declared failure
@@ -54,13 +55,13 @@ is_progress_possible(Counters) ->
         fail;
     ({_,Y}, Tail) ->
         case erlang:max(Tail, Y) of
-        End when (End+1) =:= (2 bsl 31) ->
+        End when (End+1) =:= Ringtop ->
             complete;
         Else ->
             % the normal condition, adding to the tail
             Else
         end
-    end, if (Tail0+1) =:= (2 bsl 31) -> complete; true -> Tail0 end, Rest),
+    end, if (Tail0+1) =:= Ringtop -> complete; true -> Tail0 end, Rest),
     (Start =:= 0) andalso (Result =:= complete).
 
 -spec remove_overlapping_shards(#shard{}, [{#shard{}, any()}]) ->
