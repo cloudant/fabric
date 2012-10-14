@@ -31,7 +31,11 @@ go(DbName, AllDocs0, Opts) ->
         Ref = rexi:cast(Node, {fabric_rpc, update_docs, [Name,Docs1,Options]}),
         {Shard#shard{ref=Ref}, Docs}
     end, group_docs_by_shard(DbName, AllDocs)),
-    {Workers, _} = lists:unzip(GroupedDocs),
+
+    % docs have been modified with a hash id so can't use AllDocs
+    {Workers, ResultDocs} = lists:unzip(GroupedDocs),
+    NewAllDocs = lists:usort(lists:flatten(ResultDocs)),
+
     RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, integer_to_list(mem3:quorum(DbName))),
     Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
@@ -39,12 +43,12 @@ go(DbName, AllDocs0, Opts) ->
     Timeout = fabric_util:request_timeout(),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, Acc0, infinity, Timeout) of
     {ok, {Health, Results}} when Health =:= ok; Health =:= accepted ->
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Results), R =/= noreply]};
+        {Health, [R || R <- couch_util:reorder_results(NewAllDocs, Results), R =/= noreply]};
     {timeout, Acc} ->
         {_, _, W1, _, DocReplDict} = Acc,
         {Health, _, Resp} = dict:fold(fun force_reply/3, {ok, W1, []},
             DocReplDict),
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Resp), R =/= noreply]};
+        {Health, [R || R <- couch_util:reorder_results(NewAllDocs, Resp), R =/= noreply]};
     Else ->
         Else
     after
@@ -71,6 +75,7 @@ handle_message({ok, Replies}, Worker, Acc0) ->
     {WaitingCount, DocCount, W, GroupedDocs, DocReplyDict0} = Acc0,
     {value, {_, Docs}, NewGrpDocs} = lists:keytake(Worker, 1, GroupedDocs),
     DocReplyDict = append_update_replies(Docs, Replies, DocReplyDict0),
+
     case {WaitingCount, dict:size(DocReplyDict)} of
     {1, _} ->
         % last message has arrived, we need to conclude things
@@ -167,9 +172,11 @@ good_reply(_) ->
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
 group_docs_by_shard(DbName, Docs) ->
    Result =  dict:to_list(lists:foldl(fun(Doc, D0) ->
-        {Shards, NewDoc} = mem3:shards(DbName, Doc),
+        {Shards, DocHash} = mem3:shards(DbName, Doc),
+        % add hash id to the doc here
         lists:foldl(fun(Shard, D1) ->
-            dict:append(Shard, NewDoc, D1)
+            dict:append(Shard, Doc#doc{hash_id=DocHash}, D1)
+            % dict:append(Shard, Doc, D1)
         end, D0, Shards)
     end, dict:new(), Docs)).
 
@@ -179,7 +186,26 @@ append_update_replies([Doc|Rest], [], Dict0) ->
     % icky, if replicated_changes only errors show up in result
     append_update_replies(Rest, [], dict:append(Doc, noreply, Dict0));
 append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
+<<<<<<< HEAD
     append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
+=======
+    % TODO what if the same document shows up twice in one update_docs call?
+    % filter dict for existing doc id to get this working
+    Res = lists:filter(fun(D) ->
+        D#doc.id =:= Doc#doc.id
+    end, Dict0:fetch_keys()), 
+
+    case Res of 
+    [] ->
+        append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0));
+    [K] ->
+        Vals = dict:fetch(K, Dict0),
+        Dict1 = dict:erase(K, Dict0),
+        Dict2 = dict:append(Doc, Vals, Dict1),
+        append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict2))
+    end.
+    % append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
+>>>>>>> added hash_id to update_docs
 
 skip_message({0, _, W, _, DocReplyDict}) ->
     {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []}, DocReplyDict),
@@ -212,7 +238,6 @@ doc_update1_test() ->
     Shards =
         mem3_util:create_partition_map("foo",3,1,["node1","node2","node3"]),
     GroupedDocs = group_docs_by_shard_hack(<<"foo">>,Shards,Docs),
-
 
     % test for W = 2
     AccW2 = {length(Shards), length(Docs), list_to_integer("2"), GroupedDocs,
