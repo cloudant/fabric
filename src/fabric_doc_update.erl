@@ -200,30 +200,29 @@ doc_update1_test() ->
 
     % test for W = 2
     AccW2 = {length(Shards), length(Docs), list_to_integer("2"), GroupedDocs,
-        Dict},
+        Dict,[]},
 
-    {ok,{WaitingCountW2_1,_,_,_,_}=AccW2_1} =
-        handle_message({ok, [{ok, Doc1}]},hd(Shards),AccW2),
+    {ok,{WaitingCountW2_1,_,_,_,_,_}=AccW2_1} =
+        handle_message({{ok, [{ok, Doc1}]}, 0},hd(Shards),AccW2),
     ?assertEqual(WaitingCountW2_1,2),
-    {stop, FinalReplyW2 } =
-        handle_message({ok, [{ok, Doc1}]},lists:nth(2,Shards),AccW2_1),
-    ?assertEqual({ok, [{Doc1, {ok,Doc1}}]},FinalReplyW2),
+
+    {stop, {ok, [{Doc1, {ok,Doc1}}], _Responders}} =
+        handle_message({{ok, [{ok, Doc1}]}, 0},lists:nth(2,Shards),AccW2_1),
 
     % test for W = 3
     AccW3 = {length(Shards), length(Docs), list_to_integer("3"), GroupedDocs,
-        Dict},
+        Dict,[]},
 
-    {ok,{WaitingCountW3_1,_,_,_,_}=AccW3_1} =
-        handle_message({ok, [{ok, Doc1}]},hd(Shards),AccW3),
+    {ok,{WaitingCountW3_1,_,_,_,_,_}=AccW3_1} =
+        handle_message({{ok, [{ok, Doc1}]}, 0},hd(Shards),AccW3),
     ?assertEqual(WaitingCountW3_1,2),
 
-    {ok,{WaitingCountW3_2,_,_,_,_}=AccW3_2} =
-        handle_message({ok, [{ok, Doc1}]},lists:nth(2,Shards),AccW3_1),
+    {ok,{WaitingCountW3_2,_,_,_,_,_}=AccW3_2} =
+        handle_message({{ok, [{ok, Doc1}]}, 0},lists:nth(2,Shards),AccW3_1),
     ?assertEqual(WaitingCountW3_2,1),
 
-    {stop, FinalReplyW3 } =
-        handle_message({ok, [{ok, Doc1}]},lists:nth(3,Shards),AccW3_2),
-    ?assertEqual({ok, [{Doc1, {ok,Doc1}}]},FinalReplyW3),
+    {stop, {ok, [{Doc1, {ok,Doc1}}], _Responders1}} =
+        handle_message({{ok, [{ok, Doc1}]}, 0},lists:nth(3,Shards),AccW3_2),
 
     % test w quorum > # shards, which should fail immediately
 
@@ -231,9 +230,9 @@ doc_update1_test() ->
     GroupedDocs2 = group_docs_by_shard_hack(<<"foo">>,Shards2,Docs),
 
     AccW4 =
-        {length(Shards2), length(Docs), list_to_integer("2"), GroupedDocs2, Dict},
+        {length(Shards2), length(Docs), list_to_integer("2"), GroupedDocs2, Dict, []},
     Bool =
-    case handle_message({ok, [{ok, Doc1}]},hd(Shards2),AccW4) of
+    case handle_message({{ok, [{ok, Doc1}]}, 0},hd(Shards2),AccW4) of
         {stop, _Reply} ->
             true;
         _ -> false
@@ -246,16 +245,12 @@ doc_update1_test() ->
     SA2 = #shard{node=a, range=2},
     SB2 = #shard{node=b, range=2},
     GroupedDocs3 = [{SA1,[Doc1]}, {SB1,[Doc1]}, {SA2,[Doc2]}, {SB2,[Doc2]}],
-    StW5_0 = {length(GroupedDocs3), length(Docs2), 2, GroupedDocs3, Dict2},
-    {ok, StW5_1} = handle_message({ok, [{ok, "A"}]}, SA1, StW5_0),
+    StW5_0 = {length(GroupedDocs3), length(Docs2), 2, GroupedDocs3, Dict2, []},
+    {ok, StW5_1} = handle_message({{ok, [{ok, "A"}]}, 0}, SA1, StW5_0),
     {ok, StW5_2} = handle_message({rexi_EXIT, nil}, SB1, StW5_1),
     {ok, StW5_3} = handle_message({rexi_EXIT, nil}, SA2, StW5_2),
-    {stop, ReplyW5} = handle_message({rexi_EXIT, nil}, SB2, StW5_3),
-    ?assertEqual(
-        {error, [{Doc1,{accepted,"A"}},{Doc2,{error,internal_server_error}}]},
-        ReplyW5
-    ).
-
+    {stop, {error, [{Doc1,{accepted,"A"}},{Doc2,{error,internal_server_error}}], _Responders2}} =
+        handle_message({rexi_EXIT, nil}, SB2, StW5_3).
 
 doc_update2_test() ->
     Doc1 = #doc{revs = {1,[<<"foo">>]}},
@@ -263,23 +258,20 @@ doc_update2_test() ->
     Docs = [Doc2, Doc1],
     Shards =
         mem3_util:create_partition_map("foo",3,1,["node1","node2","node3"]),
-    GroupedDocs = group_docs_by_shard_hack(<<"foo">>,Shards,Docs),
+    GroupedDocs = group_docs_by_shard_hack(<<"foo">>, Shards, Docs),
     Acc0 = {length(Shards), length(Docs), list_to_integer("2"), GroupedDocs,
-        dict:from_list([{Doc,[]} || Doc <- Docs])},
+        dict:from_list([{Doc,[]} || Doc <- Docs]), []},
 
-    {ok,{WaitingCount1,_,_,_,_}=Acc1} =
-        handle_message({ok, [{ok, Doc1},{ok, Doc2}]},hd(Shards),Acc0),
+    {ok,{WaitingCount1,_,_,_,_,_}=Acc1} =
+        handle_message({{ok, [{ok, Doc1},{ok, Doc2}]}, 0},hd(Shards),Acc0),
     ?assertEqual(WaitingCount1,2),
 
-    {ok,{WaitingCount2,_,_,_,_}=Acc2} =
+    {ok,{WaitingCount2,_,_,_,_,_}=Acc2} =
         handle_message({rexi_EXIT, 1},lists:nth(2,Shards),Acc1),
     ?assertEqual(WaitingCount2,1),
 
-    {stop, Reply} =
-        handle_message({rexi_EXIT, 1},lists:nth(3,Shards),Acc2),
-
-    ?assertEqual({accepted, [{Doc1,{accepted,Doc2}}, {Doc2,{accepted,Doc1}}]},
-        Reply).
+    {stop, {accepted, [{Doc1,{accepted,Doc2}}, {Doc2,{accepted,Doc1}}], _Responders}} =
+        handle_message({rexi_EXIT, 1},lists:nth(3,Shards),Acc2).
 
 doc_update3_test() ->
     Doc1 = #doc{revs = {1,[<<"foo">>]}},
@@ -289,20 +281,18 @@ doc_update3_test() ->
         mem3_util:create_partition_map("foo",3,1,["node1","node2","node3"]),
     GroupedDocs = group_docs_by_shard_hack(<<"foo">>,Shards,Docs),
     Acc0 = {length(Shards), length(Docs), list_to_integer("2"), GroupedDocs,
-        dict:from_list([{Doc,[]} || Doc <- Docs])},
+        dict:from_list([{Doc,[]} || Doc <- Docs]),[]},
 
-    {ok,{WaitingCount1,_,_,_,_}=Acc1} =
-        handle_message({ok, [{ok, Doc1},{ok, Doc2}]},hd(Shards),Acc0),
+    {ok,{WaitingCount1,_,_,_,_,_}=Acc1} =
+        handle_message({{ok, [{ok, Doc1},{ok, Doc2}]}, 0},hd(Shards),Acc0),
     ?assertEqual(WaitingCount1,2),
 
-    {ok,{WaitingCount2,_,_,_,_}=Acc2} =
+    {ok,{WaitingCount2,_,_,_,_,_}=Acc2} =
         handle_message({rexi_EXIT, 1},lists:nth(2,Shards),Acc1),
     ?assertEqual(WaitingCount2,1),
 
-    {stop, Reply} =
-        handle_message({ok, [{ok, Doc1},{ok, Doc2}]},lists:nth(3,Shards),Acc2),
-
-    ?assertEqual({ok, [{Doc1, {ok, Doc2}},{Doc2, {ok,Doc1}}]},Reply).
+    {stop, {ok, [{Doc1, {ok, Doc2}},{Doc2, {ok,Doc1}}], _Responders}} =
+        handle_message({{ok, [{ok, Doc1},{ok, Doc2}]}, 0},lists:nth(3,Shards),Acc2).
 
 % needed for testing to avoid having to start the mem3 application
 group_docs_by_shard_hack(_DbName, Shards, Docs) ->
