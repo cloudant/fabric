@@ -30,8 +30,10 @@
     update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
 
 % Views
--export([all_docs/5, changes/4, query_view/3, query_view/4, query_view/7,
+-export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
     get_view_group_info/2]).
+-export([all_docs/5]).
+-export([query_view/7]).
 
 % miscellany
 -export([design_docs/1, reset_validation_funs/1, cleanup_index_files/0,
@@ -234,6 +236,9 @@ purge_docs(_DbName, _IdsRevs) ->
 att_receiver(Req, Length) ->
     fabric_doc_attachments:receiver(Req, Length).
 
+all_docs(DbName, Callback, Acc0, QueryArgs) ->
+    all_docs(DbName, Callback, Acc0, QueryArgs, []).
+
 %% @doc retrieves all docs. Additional query parameters, such as `limit',
 %%      `start_key' and `end_key', `descending', and `include_docs', can
 %%      also be passed to further constrain the query. See <a href=
@@ -271,6 +276,9 @@ query_view(DbName, DesignName, ViewName) ->
 query_view(DbName, DesignName, ViewName, QueryArgs) ->
     Callback = fun default_callback/2,
     query_view(DbName, DesignName, ViewName, Callback, [], QueryArgs, "").
+
+query_view(DbName, DesignName, ViewName, Callback, Acc0, QueryArgs) ->
+    query_view(DbName, DesignName, ViewName, Callback, Acc0, QueryArgs, []).
 
 %% @doc execute a given view.
 %%      There are many additional query args that can be passed to a view,
