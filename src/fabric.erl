@@ -196,8 +196,8 @@ update_doc(DbName, Doc, Options) ->
     case update_docs(DbName, [Doc], opts(Options)) of
     {ok, [{ok, NewRev}], EncShards} ->
         {ok, NewRev, EncShards};
-    {accepted, [{accepted, NewRev}]} ->
-        {accepted, NewRev};
+    {accepted, [{accepted, NewRev}], EncShards} ->
+        {accepted, NewRev, EncShards};
     {ok, [{{_Id, _Rev}, Error}], _} ->
         throw(Error);
     {ok, [Error], _} ->
@@ -216,8 +216,8 @@ update_docs(DbName, Docs, Options) ->
         fabric_doc_update:go(dbname(DbName), docs(Docs), opts(Options)) of
         {ok, Results, EncShards} ->
             {ok, Results, EncShards};
-        {accepted, Results, _EncShards} ->
-            {accepted, Results};
+        {accepted, Results, EncShards} ->
+            {accepted, Results, EncShards};
         Error ->
             throw(Error)
     catch {aborted, PreCommitFailures} ->
