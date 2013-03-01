@@ -45,7 +45,8 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
                 Acc,
                 Timeout,
                 UpdateListener,
-                os:timestamp()
+                os:timestamp(),
+                Feed
             )
         after
             fabric_db_update_listener:stop(UpdateListener)
@@ -66,16 +67,17 @@ go(DbName, "normal", Options, Callback, Acc0) ->
             Callback,
             Since,
             Acc,
-            5000
+            5000,
+            "normal"
         ),
         Callback({stop, pack_seqs(Seqs)}, AccOut);
     Error ->
         Callback(Error, Acc0)
     end.
 
-keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0) ->
+keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0, Feed) ->
     #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} = Args,
-    {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout),
+    {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, Feed),
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
     LastSeq = pack_seqs(NewSeqs),
     if Limit > Limit2, Feed == "longpoll" ->
@@ -104,12 +106,13 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
                 AccTimeout,
                 Timeout,
                 UpListen,
-                T0
+                T0,
+                Feed
             )
         end
     end.
 
-send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
+send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout, Feed) ->
     LiveNodes = [node() | nodes()],
     AllLiveShards = mem3:live_shards(DbName, LiveNodes),
     Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, Seq}) ->
@@ -135,7 +138,10 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
         counters = orddict:from_list(Seqs),
         user_acc = AccIn,
         limit = ChangesArgs#changes_args.limit,
-        rows = Seqs % store sequence positions instead
+        rows = Seqs, % store sequence positions instead
+        last_seen = os:timestamp(),
+        feed = Feed,
+        filter_timeout = Timeout
     },
     %% TODO: errors need to be handled here
     try
@@ -149,9 +155,17 @@ receive_results(Workers, State, Timeout, Callback) ->
     case rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, State,
             infinity, Timeout) of
     {timeout, NewState0} ->
-        {ok, AccOut} = Callback(timeout, NewState0#collector.user_acc),
-        NewState = NewState0#collector{user_acc = AccOut},
-        receive_results(Workers, NewState, Timeout, Callback);
+        Heartbeat = NewState0#collector.query_args#changes_args.heartbeat,
+        Feed = NewState0#collector.feed,
+        case Heartbeat of
+        undefined when Feed =:= "continuous" ->
+            % bail here and let keep_sending_changes return last_seq
+            {ok, NewState0};
+        _ ->
+            {ok, AccOut} = Callback(timeout, NewState0#collector.user_acc),
+            NewState = NewState0#collector{user_acc = AccOut},
+            receive_results(Workers, NewState, Timeout, Callback)
+        end;
     {_, NewState} ->
         {ok, NewState}
     end.
@@ -202,7 +216,48 @@ handle_message(#change{key=Seq} = Row0, {Worker, From}, St) ->
             Row = Row0#change{key = pack_seqs(S2)},
             {Go, Acc} = Callback(changes_row(Row, IncludeDocs), AccIn),
             rexi:stream_ack(From),
-            {Go, St#collector{counters=S2, limit=Limit-1, user_acc=Acc}};
+            {Go, St#collector{counters=S2, limit=Limit-1, user_acc=Acc,
+                             last_seen=os:timestamp()}};
+        false ->
+            Reason = {range_not_covered, <<"progress not possible">>},
+            Callback({error, Reason}, AccIn),
+            rexi:stream_ack(From),
+            {stop, St#collector{counters=S2}}
+        end
+    end;
+
+handle_message({no_pass, Seq}, {Worker, From}, St) ->
+    #collector{
+        callback = Callback,
+        counters = S0,
+        limit = Limit,
+        user_acc = AccIn,
+        last_seen = LastSeen,
+        filter_timeout = Timeout
+    } = St,
+    case fabric_dict:lookup_element(Worker, S0) of
+    undefined ->
+        % this worker lost the race with other partition copies, terminate it
+        rexi:stream_ack(From),
+        {ok, St};
+    _ ->
+        S1 = fabric_dict:store(Worker, Seq, S0),
+        S2 = fabric_view:remove_overlapping_shards(Worker, S1),
+        % this check should not be necessary at all, as holes in the ranges
+        % created from DOWN messages would have led to errors
+        case fabric_view:is_progress_possible(S2) of
+        true ->
+            ExpiredTime = timer:now_diff(os:timestamp(), LastSeen) div 1000,
+            TimeLeft = Timeout - ExpiredTime,
+            case  ExpiredTime > Timeout of
+            true ->
+                % we're done bail out with timeout
+                rexi:stream_ack(From),
+                {timeout, St#collector{counters=S2, limit=Limit-1}};
+            false ->
+                rexi:stream_ack(From),
+                {new_timeout, TimeLeft, St#collector{counters=S2, limit=Limit-1}}
+            end;
         false ->
             Reason = {range_not_covered, <<"progress not possible">>},
             Callback({error, Reason}, AccIn),
