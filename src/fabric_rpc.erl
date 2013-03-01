@@ -433,7 +433,8 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     #doc_info{high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
     case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
     [] ->
-        {ok, {Db, Seq, Args, Options}};
+        Go = rexi:sync_reply({no_pass, Seq}),
+        {Go, {Db, Seq, Args, Options}};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
