@@ -81,9 +81,9 @@ changes(DbName, Options, StartSeq) ->
     {ok, Db} ->
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args, Options},
+        Acc0 = {Db, StartSeq, Args, Options, 0},
         try
-            {ok, {_, LastSeq, _, _}} =
+            {ok, {_, LastSeq, _, _, _}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
             rexi:reply({complete, LastSeq})
         after
@@ -424,7 +424,7 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
         end
     end.
 
-changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
+changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Count}) ->
     #changes_args{
         include_docs = IncludeDocs,
         filter = Acc
@@ -432,13 +432,16 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     Conflicts = proplists:get_value(conflicts, Options, false),
     #doc_info{high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
     case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
+    [] when Count < 10 ->
+        {ok, {Db, Seq, Args, Options, Count + 1}};
     [] ->
-        {ok, {Db, Seq, Args, Options}};
+        rexi:stream({no_pass, Seq}),
+        {ok, {Db, Seq, Args, Options, 0}};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
         Go = rexi:stream(ChangesRow),
-        {Go, {Db, Seq, Args, Options}}
+        {Go, {Db, Seq, Args, Options, Count}}
     end.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
