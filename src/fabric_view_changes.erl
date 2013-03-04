@@ -190,7 +190,7 @@ handle_message(#change{key=Seq} = Row0, {Worker, From}, St) ->
     case fabric_dict:lookup_element(Worker, S0) of
     undefined ->
         % this worker lost the race with other partition copies, terminate it
-        gen_server:reply(From, stop),
+        rexi:stream_ack(From),
         {ok, St};
     _ ->
         S1 = fabric_dict:store(Worker, Seq, S0),
@@ -201,12 +201,12 @@ handle_message(#change{key=Seq} = Row0, {Worker, From}, St) ->
         true ->
             Row = Row0#change{key = pack_seqs(S2)},
             {Go, Acc} = Callback(changes_row(Row, IncludeDocs), AccIn),
-            gen_server:reply(From, Go),
+            rexi:stream_ack(From),
             {Go, St#collector{counters=S2, limit=Limit-1, user_acc=Acc}};
         false ->
             Reason = {range_not_covered, <<"progress not possible">>},
             Callback({error, Reason}, AccIn),
-            gen_server:reply(From, stop),
+            rexi:stream_ack(From),
             {stop, St#collector{counters=S2}}
         end
     end;

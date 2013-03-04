@@ -437,7 +437,7 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
-        Go = rexi:sync_reply(ChangesRow),
+        Go = rexi:stream(ChangesRow),
         {Go, {Db, Seq, Args, Options}}
     end.
 
