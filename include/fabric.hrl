@@ -31,7 +31,10 @@
     reducer,
     lang,
     sorted,
-    user_acc
+    user_acc,
+    last_seen,
+    feed,
+    filter_timeout
 }).
 
 -record(view_row, {key, id, value, doc, worker}).
