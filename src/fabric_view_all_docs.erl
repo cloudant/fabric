@@ -169,8 +169,15 @@ doc_receive_loop(Keys, Pids, SpawnFun, MaxJobs, Callback, AccIn) ->
         doc_receive_loop(RKeys, Pids1, SpawnFun, MaxJobs, Callback, AccIn);
     _ ->
         {{value, {Pid, Ref}}, RestPids} = queue:out(Pids),
-        receive {'DOWN', Ref, process, Pid, #view_row{} = Row} ->
-            case Callback(fabric_view:transform_row(Row), AccIn) of
+        receive
+        {'DOWN', Ref, process, Pid, Reason} ->
+            case Reason of
+            #view_row{} = Row ->
+                NewRow = Row;
+            {{illegal_docid, Id}, _} ->
+                NewRow = #view_row{key = Id, doc = undefined}
+            end,
+            case Callback(fabric_view:transform_row(NewRow), AccIn)  of
             {ok, Acc} ->
                 doc_receive_loop(
                     Keys, RestPids, SpawnFun, MaxJobs, Callback, Acc
