@@ -21,7 +21,7 @@
 
 go(DbName, SnapshotName, Options) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, db_snapshot, [SnapshotName, Options]),
+    Workers = fabric_util:submit_jobs(Shards, snapshot_db, [SnapshotName, Options]),
     RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil)},
     try
