@@ -14,7 +14,8 @@
 
 -module(fabric_rpc).
 
--export([get_db_info/1, get_doc_count/1, get_update_seq/1, snapshot_db/3]).
+-export([get_db_info/1, get_doc_count/1, get_update_seq/1, snapshot_db/3,
+         all_snapshots/1]).
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
     update_docs/3]).
 -export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
@@ -202,6 +203,9 @@ create_db(DbName) ->
 
 snapshot_db(DbName, SnapshotName, Options) ->
     with_db(DbName, [], {couch_db, snapshot, [SnapshotName, Options]}).
+
+all_snapshots(DbName) ->
+    with_db(DbName, [], {couch_db, all_snapshots, []}).
 
 create_shard_db_doc(_, Doc) ->
     rexi:reply(mem3_util:write_db_doc(Doc)).

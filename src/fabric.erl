@@ -23,7 +23,8 @@
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
     delete_db/2, get_db_info/1, get_doc_count/1, set_revs_limit/3,
     set_security/2, set_security/3, get_revs_limit/1, get_security/1,
-    get_security/2, get_all_security/1, get_all_security/2, snapshot_db/3]).
+    get_security/2, get_all_security/1, get_all_security/2,
+    all_snapshots/1, snapshot_db/3]).
 
 % Documents
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
@@ -118,6 +119,11 @@ delete_db(DbName, Options) ->
 -spec snapshot_db(dbname(), iodata(), [option()]) -> ok | {error, atom()}.
 snapshot_db(DbName, SnapshotName, Options) ->
     fabric_db_snapshot:go(dbname(DbName), SnapshotName, opts(Options)).
+
+%% @doc snapshot a database
+-spec all_snapshots(dbname()) -> ok | {error, atom()}.
+all_snapshots(DbName) ->
+    fabric_all_snapshots:go(dbname(DbName)).
 
 %% @doc provide an upper bound for the number of tracked document revisions
 -spec set_revs_limit(dbname(), pos_integer(), [option()]) -> ok.
