@@ -16,7 +16,9 @@
 
 -export([submit_jobs/3, submit_jobs/4, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
         update_counter/3, remove_ancestors/2, create_monitors/1, kv/2,
-        remove_down_workers/2]).
+        update_seqs/3,
+        remove_down_workers/2, remove_non_preferred_shards/2,
+        pack/1, process_enc_shards/2]).
 -export([request_timeout/0]).
 
 -include("fabric.hrl").
@@ -143,6 +145,84 @@ create_monitors(Shards) ->
     MonRefs = lists:usort([{rexi_server, N} || #shard{node=N} <- Shards]),
     rexi_monitor:start(MonRefs).
 
+remove_non_preferred_shards(PreferredShards, Shards) ->
+    %% the preferred shards are the good ones. Remove shards that
+    %% are in the same range but different nodes
+    lists:foldl(fun(Shard, Acc) ->
+                    case check_shard(Shard, PreferredShards) of
+                    -1 ->
+                        Acc;
+                    DbSeq ->
+                        [{Shard, DbSeq} | Acc]
+                    end
+                end, [], Shards).
+
+check_shard(_, []) ->
+    0;
+check_shard(#shard{name=Name, node=Node}=Shard, [{#shard{name=Name2, node=Node2}, DbSeq} | Rest]) ->
+    case Name =:= Name2 of
+    true ->
+        case Node =:= Node2 of
+        true ->
+            DbSeq;
+        false ->
+            -1
+        end;
+    _ ->
+        check_shard(Shard, Rest)
+    end.
+
+
+process_enc_shards(EncShards, DbName) ->
+    case EncShards of
+    [] -> [];
+    _ ->
+        unpack_seqs(EncShards, DbName)
+    end.
+
+pack(Responders) ->
+    ShardList = [{N,R,DbSeq} || {#shard{node=N, range=R}, DbSeq} <- Responders],
+    couch_util:encodeBase64Url(term_to_binary(ShardList, [compressed])).
+
+unpack_seqs(Packed, DbName) ->
+    NodeRangeSeqs = unpack_and_merge(Packed),
+    lists:map(fun({Node, Range, DbSeq}) ->
+                  {ok, Shard} = mem3:get_shard(DbName, Node, Range),
+                  {Shard, DbSeq}
+              end,
+              NodeRangeSeqs).
+
+unpack_and_merge(PackedNRS) ->
+    NodeRangeSeqs =
+        lists:foldl(fun(NRQ, Acc) ->
+                        binary_to_term(couch_util:decodeBase64Url(NRQ)) ++ Acc
+                    end,[],PackedNRS),
+    MergedList =
+        lists:foldl(fun({Node,Range,Seq}, Acc) ->
+                        [merge({Node,Range,Seq}, NodeRangeSeqs) | Acc]
+                    end,[],NodeRangeSeqs),
+    lists:usort(MergedList).
+
+merge(NRS, []) ->
+    NRS;
+
+merge({Node, Range, Seq}, [{Node2, Range2, Seq2} | Rest]) ->
+    case Node =:= Node2 andalso Range =:= Range2 of
+    true ->
+        {Node, Range, erlang:max(Seq,Seq2)};
+    false ->
+        merge({Node, Range, Seq}, Rest)
+    end.
+
+update_seqs(DbSeq, Worker, #collector{seqs=Seqs}=State) ->
+    case lists:member({Worker, DbSeq}, Seqs) of
+    true ->
+        NewSeqs = Seqs;
+    false ->
+        NewSeqs = [{Worker, DbSeq} | Seqs]
+    end,
+    State#collector{seqs=NewSeqs}.
+
 %% verify only id and rev are used in key.
 update_counter_test() ->
     Reply = {ok, #doc{id = <<"id">>, revs = <<"rev">>,
@@ -171,3 +251,185 @@ remove_ancestors_test() ->
 %% test function
 kv(Item, Count) ->
     {make_key(Item), {Item,Count}}.
+
+remove_non_preferred_shards_test() ->
+    Shards =
+        [{shard,<<"shards/00000000-7fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/80000000-ffffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [536870912,1073741823],
+          undefined},
+         {shard,<<"shards/00000000-7fffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/80000000-ffffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [536870912,1073741823],
+          undefined},
+         {shard,<<"shards/00000000-7fffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/80000000-ffffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [536870912,1073741823],
+          undefined}],
+    PreferredShards =
+        [{{shard,<<"shards/00000000-7fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [0,536870911],
+          undefined},2},
+         {{shard,<<"shards/80000000-ffffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [536870912,1073741823],
+           undefined},3}],
+    NewShards = remove_non_preferred_shards(PreferredShards, Shards),
+    ?assertEqual(lists:reverse(NewShards),PreferredShards),
+    ok.
+
+remove_non_preferred_shards2_test() ->
+    Shards =
+        [{shard,<<"shards/00000000-3fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},
+         {shard,<<"shards/80000000-bfffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [2147483648,2684354559],
+          undefined},
+         {shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},
+         {shard,<<"shards/00000000-3fffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},
+         {shard,<<"shards/80000000-bfffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [2147483648,2684354559],
+          undefined},
+         {shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},
+         {shard,<<"shards/00000000-3fffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},
+         {shard,<<"shards/80000000-bfffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [2147483648,2684354559],
+          undefined},
+         {shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined}],
+    PreferredShards =
+        [{{shard,<<"shards/00000000-3fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [0,536870911],
+          undefined},2},
+         {{shard,<<"shards/80000000-bfffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [536870912,1073741823],
+           undefined},3}],
+    ExpectedShards =
+            [{{shard,<<"shards/00000000-3fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [0,536870911],
+          undefined},2},
+         {{shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},0},
+         {{shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node1',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},0},
+         {{shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},0},
+         {{shard,<<"shards/80000000-bfffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [2147483648,2684354559],
+          undefined},3},
+         {{shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node2',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},0},
+         {{shard,<<"shards/40000000-7fffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},0},
+         {{shard,<<"shards/c0000000-ffffffff/testdb1">>,
+          'node3',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},0}],
+    NewShards = remove_non_preferred_shards(PreferredShards, Shards),
+    ?assertEqual(lists:reverse(NewShards),ExpectedShards),
+    ok.
+
+unpack_and_merge_test() ->
+    Shards =
+        [{shard,<<"shards/00000000-1fffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [0,536870911],
+          undefined},
+         {shard,<<"shards/20000000-3fffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [536870912,1073741823],
+          undefined},
+         {shard,<<"shards/40000000-5fffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [1073741824,1610612735],
+          undefined},
+         {shard,<<"shards/60000000-7fffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [1610612736,2147483647],
+          undefined},
+         {shard,<<"shards/80000000-9fffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [2147483648,2684354559],
+          undefined},
+         {shard,<<"shards/a0000000-bfffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [2684354560,3221225471],
+          undefined},
+         {shard,<<"shards/c0000000-dfffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [3221225472,3758096383],
+          undefined},
+         {shard,<<"shards/e0000000-ffffffff/testdb1">>,
+          'bigcouch@node.local',<<"testdb1">>,
+          [3758096384,4294967295],
+          undefined}],
+    Responders1 = lists:map(fun(S) ->
+                                {S, 1}
+                            end, Shards),
+    Responders2 = lists:map(fun(S) ->
+                                {S, 2}
+                            end, Shards),
+    P1 = pack(Responders1),
+    P2 = pack(Responders2),
+    ShardList = [{N,R,DbSeq} || {#shard{node=N, range=R}, DbSeq} <- Responders2],
+    ?assertEqual(ShardList, unpack_and_merge([P1, P2])),
+    ok.
+

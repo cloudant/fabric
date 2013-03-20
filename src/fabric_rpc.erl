@@ -16,7 +16,7 @@
 
 -export([get_db_info/1, get_doc_count/1, get_update_seq/1]).
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
-    update_docs/3]).
+    update_docs/3, update_docs_seq/3]).
 -export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
@@ -34,7 +34,9 @@
     offset = nil,
     total_rows,
     reduce_fun = fun couch_db:enum_docs_reduce_to_count/1,
-    group_level = 0
+    group_level = 0,
+    % send_seq is used to determine if db sequence is part of the message
+    send_seq = false
 }).
 
 %% rpc endpoints
@@ -70,7 +72,7 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
         {EndKeyType, if is_binary(EndKey) -> EndKey; true -> EndDocId end}
     ],
     {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, Options),
-    final_response(Total, Acc#view_acc.offset).
+    final_response(Total, Acc).
 
 changes(DbName, #changes_args{} = Args, StartSeq) ->
     changes(DbName, [Args], StartSeq);
@@ -104,11 +106,12 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
         view_type = ViewType,
         extra = Extra
     } = QueryArgs,
+    DbSeq = proplists:get_value(curr_seq, Extra, 0),
     set_io_priority(DbName, Extra),
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     Group0 = couch_view_group:design_doc_to_view_group(DDoc),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
-    {ok, Group} = couch_view_group:request_group(Pid, MinSeq),
+    {ok, Group} = couch_view_group:request_group(Pid, compute_min(MinSeq,DbSeq)),
     maybe_update_view_group(Pid, LastSeq, Stale),
     erlang:monitor(process, couch_view_group:get_fd(Group)),
     Views = couch_view_group:get_views(Group),
@@ -120,7 +123,8 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
         conflicts = proplists:get_value(conflicts, Extra, false),
         limit = Limit+Skip,
         total_rows = Total,
-        reduce_fun = fun couch_view:reduce_to_count/1
+        reduce_fun = fun couch_view:reduce_to_count/1,
+        send_seq = true
     },
     case Keys of
     nil ->
@@ -135,7 +139,8 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
             Out
         end, Acc0, Keys)
     end,
-    final_response(Total, Acc#view_acc.offset).
+    final_response(Total, Acc).
+
 
 reduce_view(DbName, #doc{} = DDoc, ViewName, QueryArgs) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
@@ -151,18 +156,20 @@ reduce_view(DbName, Group0, ViewName, QueryArgs) ->
         stale = Stale,
         extra = Extra
     } = QueryArgs,
+    DbSeq = proplists:get_value(curr_seq, Extra, 0),
     set_io_priority(DbName, Extra),
     GroupFun = group_rows_fun(GroupLevel),
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
-    {ok, Group} = couch_view_group:request_group(Pid, MinSeq),
+    {ok, Group} = couch_view_group:request_group(Pid, compute_min(MinSeq, DbSeq)),
     maybe_update_view_group(Pid, LastSeq, Stale),
     Lang = couch_view_group:get_language(Group),
     Views = couch_view_group:get_views(Group),
     erlang:monitor(process, couch_view_group:get_fd(Group)),
     {NthRed, View} = fabric_view:extract_view(Pid, ViewName, Views, reduce),
     ReduceView = {reduce, NthRed, Lang, View},
-    Acc0 = #view_acc{group_level = GroupLevel, limit = Limit+Skip},
+    Acc0 = #view_acc{db=Db, group_level = GroupLevel,
+                     limit = Limit+Skip, send_seq = true},
     case Keys of
     nil ->
         Options0 = couch_httpd_view:make_key_options(QueryArgs),
@@ -186,6 +193,13 @@ calculate_seqs(Db, Stale) ->
         true ->
             {LastSeq, LastSeq}
     end.
+
+% If Db decoded sequence wasn't used then go with the MinSeq computed
+% from the Stale args and update sequence
+compute_min(MinSeq,0) ->
+    MinSeq;
+compute_min(MinSeq, DbSeq) ->
+    erlang:min(MinSeq, DbSeq).
 
 maybe_update_view_group(GroupPid, LastSeq, update_after) ->
     couch_view_group:trigger_group_update(GroupPid, LastSeq);
@@ -255,6 +269,36 @@ get_missing_revs(DbName, IdRevsList, Options) ->
         Error
     end).
 
+update_docs_seq(DbName, Docs0, Options) ->
+    case proplists:get_value(replicated_changes, Options) of
+    true ->
+        X = replicated_changes;
+    _ ->
+        X = interactive_edit
+    end,
+    Docs = make_att_readers(Docs0),
+    %% inlining with_db here to return a tuple instead and not
+    %% have to contend with all the other callers of with_db
+    set_io_priority(DbName, Options),
+    case get_or_create_db(DbName, Options) of
+    {ok, Db} ->
+        rexi:reply(try
+            Reply = couch_db:update_docs(Db, Docs, Options, X),
+            %% open db again to get updated sequence
+            {ok, DbNew} = get_or_create_db(DbName, Options),
+            SeqAfter = couch_db:get_update_seq(DbNew),
+            {Reply, SeqAfter}
+        catch Exception ->
+            Exception;
+        error:Reason ->
+            twig:log(error, "rpc ~p:~p/~p ~p ~p", [couch_db, update_docs, 4, Reason,
+                clean_stack()]),
+            {error, Reason}
+        end);
+    Error ->
+        rexi:reply(Error)
+    end.
+
 update_docs(DbName, Docs0, Options) ->
     case proplists:get_value(replicated_changes, Options) of
     true ->
@@ -264,6 +308,7 @@ update_docs(DbName, Docs0, Options) ->
     end,
     Docs = make_att_readers(Docs0),
     with_db(DbName, Options, {couch_db, update_docs, [Docs, Options, X]}).
+
 
 group_info(DbName, Group0) ->
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
@@ -316,11 +361,19 @@ view_fold(#full_doc_info{} = FullDocInfo, OffsetReds, Acc) ->
     #doc_info{revs=[#rev_info{deleted=true}|_]} ->
         {ok, Acc}
     end;
-view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total} = Acc) ->
+view_fold(KV, OffsetReds, #view_acc{db=Db, offset=nil,
+                                    total_rows=Total, send_seq=SendSeq} = Acc) ->
     % calculates the offset for this shard
     #view_acc{reduce_fun=Reduce} = Acc,
     Offset = Reduce(OffsetReds),
-    case rexi:sync_reply({total_and_offset, Total, Offset}) of
+    case SendSeq of
+    true ->
+        DbSeq = couch_db:get_update_seq(Db),
+        Msg = {total_and_offset, Total, Offset, DbSeq};
+    false ->
+        Msg = {total_and_offset, Total, Offset}
+    end,
+    case rexi:sync_reply(Msg) of
     ok ->
         view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
     stop ->
@@ -338,7 +391,8 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
         doc_info = DocInfo,
         limit = Limit,
         conflicts = Conflicts,
-        include_docs = IncludeDocs
+        include_docs = IncludeDocs,
+        send_seq = SendSeq
     } = Acc,
     case Value of {Props} ->
         LinkedDocs = (couch_util:get_value(<<"_id">>, Props) =/= undefined);
@@ -362,22 +416,35 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
     true ->
         Doc = undefined
     end,
-    case rexi:stream(#view_row{key=Key, id=Id, value=Value, doc=Doc}) of
+    case SendSeq of
+    true ->
+        DbSeq = couch_db:get_update_seq(Db),
+        Msg = {#view_row{key=Key, id=Id, value=Value, doc=Doc}, DbSeq};
+    false ->
+        Msg = #view_row{key=Key, id=Id, value=Value, doc=Doc}
+    end,
+    case rexi:stream(Msg) of
         ok ->
             {ok, Acc#view_acc{limit=Limit-1}};
         timeout ->
             exit(timeout)
     end.
 
-final_response(Total, nil) ->
-    case rexi:sync_reply({total_and_offset, Total, Total}) of ok ->
+final_response(Total, #view_acc{db=Db, offset=nil, send_seq=SendSeq}) ->
+    case SendSeq of
+    true ->
+        Msg = {total_and_offset, Total, Total, couch_db:get_update_seq(Db)};
+    false ->
+        Msg = {total_and_offset, Total, Total}
+    end,
+    case rexi:sync_reply(Msg) of ok ->
         rexi:reply(complete);
     stop ->
         ok;
     timeout ->
         exit(timeout)
     end;
-final_response(_Total, _Offset) ->
+final_response(_,_) ->
     rexi:reply(complete).
 
 %% TODO: handle case of bogus group level
@@ -404,10 +471,11 @@ reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0 ->
     send(K, Red, Acc).
 
 
-send(Key, Value, #view_acc{limit=Limit} = Acc) ->
+send(Key, Value, #view_acc{db=Db, limit=Limit} = Acc) ->
     case put(fabric_sent_first_row, true) of
     undefined ->
-        case rexi:sync_reply(#view_row{key=Key, value=Value}) of
+        Msg = {#view_row{key=Key, value=Value}, couch_db:get_update_seq(Db)},
+        case rexi:sync_reply(Msg) of
         ok ->
             {ok, Acc#view_acc{limit=Limit-1}};
         stop ->

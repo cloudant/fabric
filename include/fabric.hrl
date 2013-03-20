@@ -31,7 +31,9 @@
     reducer,
     lang,
     sorted,
-    user_acc
+    user_acc,
+    seqs = [],
+    seqs_sent = false
 }).
 
 -record(view_row, {key, id, value, doc, worker}).
