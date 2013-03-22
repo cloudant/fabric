@@ -66,7 +66,7 @@ get_db(DbName, Options) ->
     % suppress shards from down nodes
     Nodes = [node()|erlang:nodes()],
     Live = [S || #shard{node = N} = S <- Shards, lists:member(N, Nodes)],
-    get_shard(Live, Options, 100).
+    get_shard(Live, Options, 200).
 
 get_shard([], _Opts, _Timeout) ->
     erlang:error({internal_server_error, "No DB shards could be opened."});
@@ -77,7 +77,7 @@ get_shard([#shard{node = Node, name = Name} | Rest], Opts, Timeout) ->
     {unauthorized, _} = Error ->
         throw(Error);
     {badrpc, {'EXIT', {timeout, _}}} ->
-        get_shard(Rest, Opts, 2*Timeout);
+        get_shard(Rest, Opts, 4*Timeout);
     _Else ->
         get_shard(Rest, Opts, Timeout)
     end.
