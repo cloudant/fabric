@@ -419,6 +419,9 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
         end
     end.
 
+changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
+        {Db, _OldSeq, Args, Options}) ->
+    {ok, {Db, Seq, Args, Options}};
 changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     #changes_args{
         include_docs = IncludeDocs,
