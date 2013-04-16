@@ -309,10 +309,15 @@ get_view_group_info(DbName, DesignId) ->
 %% @doc retrieve all the design docs from a database
 -spec design_docs(dbname()) -> {ok, [json_obj()]}.
 design_docs(DbName) ->
+    Extra = case get(io_priority) of
+        undefined -> [];
+        Else -> [{io_priority, Else}]
+    end,
     QueryArgs = #view_query_args{
         start_key = <<"_design/">>,
         end_key = <<"_design0">>,
-        include_docs=true
+        include_docs=true,
+        extra=Extra
     },
     Callback = fun({total_and_offset, _, _}, []) ->
         {ok, []};
