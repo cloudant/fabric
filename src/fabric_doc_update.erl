@@ -20,6 +20,16 @@
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
+
+-record(acc, {
+    num_workers,
+    num_docs,
+    w,
+    grouped_docs,
+    reply_dict
+}).
+
+
 go(_, [], _) ->
     {ok, []};
 go(DbName, AllDocs, Opts) ->
@@ -32,16 +42,24 @@ go(DbName, AllDocs, Opts) ->
     {Workers, _} = lists:unzip(GroupedDocs),
     RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, integer_to_list(mem3:quorum(DbName))),
-    Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
-        dict:from_list([{Doc,[]} || Doc <- AllDocs])},
+    Acc0 = #acc{
+        num_workers = length(Workers),
+        num_docs = length(AllDocs),
+        w = list_to_integer(W),
+        grouped_docs = GroupedDocs,
+        replies = dict:from_list([{Doc, []} || Doc <- AllDocs])
+    },
     Timeout = fabric_util:request_timeout(),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, Acc0, infinity, Timeout) of
     {ok, {Health, Results}} when Health =:= ok; Health =:= accepted ->
         {Health, [R || R <- couch_util:reorder_results(AllDocs, Results), R =/= noreply]};
     {timeout, Acc} ->
-        {_, _, W1, _, DocReplDict} = Acc,
+        #acc{
+            w = W1,
+            reply_doc = DocReplyDict
+        } = Acc0,
         {Health, _, Resp} = dict:fold(fun force_reply/3, {ok, W1, []},
-            DocReplDict),
+            DocReplyDict),
         {Health, [R || R <- couch_util:reorder_results(AllDocs, Resp), R =/= noreply]};
     Else ->
         Else
@@ -50,26 +68,46 @@ go(DbName, AllDocs, Opts) ->
     end.
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, Acc0) ->
-    {_, LenDocs, W, GroupedDocs, DocReplyDict} = Acc0,
+    #acc{
+        grouped_docs = GroupedDocs
+    } = Acc0,
     NewGrpDocs = [X || {#shard{node=N}, _} = X <- GroupedDocs, N =/= NodeRef],
-    skip_message({length(NewGrpDocs), LenDocs, W, NewGrpDocs, DocReplyDict});
+    skip_message(Acc0#acc{
+        num_workers = length(NewGrpDocs),
+        grouped_docs = NewGrpDocs
+    });
 
 handle_message({rexi_EXIT, _}, Worker, Acc0) ->
-    {WC,LenDocs,W,GrpDocs,DocReplyDict} = Acc0,
-    NewGrpDocs = lists:keydelete(Worker,1,GrpDocs),
-    skip_message({WC-1,LenDocs,W,NewGrpDocs,DocReplyDict});
+    #acc{
+        num_workers = NumWorkers,
+        grouped_docs = GroupedDocs
+    } = Acc0,
+    skip_message(Acc0#acc{
+        num_workers = NumWorkers - 1,
+        grouped_docs = lists:keydelete(Worker, 1, GroupedDocs)
+    });
 handle_message(internal_server_error, Worker, Acc0) ->
     % happens when we fail to load validation functions in an RPC worker
-    {WC,LenDocs,W,GrpDocs,DocReplyDict} = Acc0,
-    NewGrpDocs = lists:keydelete(Worker,1,GrpDocs),
-    skip_message({WC-1,LenDocs,W,NewGrpDocs,DocReplyDict});
+    #acc{
+        num_workers = NumWorkers,
+        grouped_docs = GroupeDocs
+    } = Acc0,
+    skip_message(Acc0#acc{
+        num_workers = NumWorkers - 1,
+        grouped_docs = lists:keydelete(Worker, 1, GroupedDocs)
+    });
 handle_message(attachment_chunk_received, _Worker, Acc0) ->
     {ok, Acc0};
 handle_message({ok, Replies}, Worker, Acc0) ->
-    {WaitingCount, DocCount, W, GroupedDocs, DocReplyDict0} = Acc0,
+    #acc{
+        num_workers = NumWorkers,
+        w = W,
+        grouped_docs = GroupedDocs,
+        reply_dict = DocReplyDict0
+    } = Acc0,
     {value, {_, Docs}, NewGrpDocs} = lists:keytake(Worker, 1, GroupedDocs),
     DocReplyDict = append_update_replies(Docs, Replies, DocReplyDict0),
-    case {WaitingCount, dict:size(DocReplyDict)} of
+    case {NumWorkers, dict:size(DocReplyDict)} of
     {1, _} ->
         % last message has arrived, we need to conclude things
         {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []},
@@ -79,7 +117,12 @@ handle_message({ok, Replies}, Worker, Acc0) ->
         % we've got at least one reply for each document, let's take a look
         case dict:fold(fun maybe_reply/3, {stop,W,[]}, DocReplyDict) of
         continue ->
-            {ok, {WaitingCount - 1, DocCount, W, NewGrpDocs, DocReplyDict}};
+            {ok, Acc0#acc{
+                num_workers = NumWorkers - 1,
+                doc_count = DocCount,
+                grouped_docs = NewGrpDocs,
+                reply_dict = DocReplyDict
+            }};
         {stop, W, FinalReplies} ->
             {stop, {ok, FinalReplies}}
         end
@@ -87,8 +130,7 @@ handle_message({ok, Replies}, Worker, Acc0) ->
 handle_message({missing_stub, Stub}, _, _) ->
     throw({missing_stub, Stub});
 handle_message({not_found, no_db_file} = X, Worker, Acc0) ->
-    {_, _, _, GroupedDocs, _} = Acc0,
-    Docs = couch_util:get_value(Worker, GroupedDocs),
+    Docs = couch_util:get_value(Worker, Acc0#acc.grouped_docs),
     handle_message({ok, [X || _D <- Docs]}, Worker, Acc0).
 
 force_reply(Doc, [], {_, W, Acc}) ->
@@ -160,8 +202,9 @@ append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
     % TODO what if the same document shows up twice in one update_docs call?
     append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
 
-skip_message({0, _, W, _, DocReplyDict}) ->
-    {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []}, DocReplyDict),
+
+skip_message(#acc{num_workers = 0, w = W, reply_dic = ReplyDict}) ->
+    {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []}, ReplyDict),
     {stop, {Health, Reply}};
 skip_message(Acc0) ->
     {ok, Acc0}.
