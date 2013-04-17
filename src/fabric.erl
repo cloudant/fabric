@@ -194,8 +194,12 @@ update_doc(DbName, Doc, Options) ->
     case update_docs(DbName, [Doc], opts(Options)) of
     {ok, [{ok, NewRev}]} ->
         {ok, NewRev};
+    {ok, [{ok, NewRev, Clock}]} ->
+        {ok, NewRev, Clock};
     {accepted, [{accepted, NewRev}]} ->
         {accepted, NewRev};
+    {accepted, [{accepted, NewRev, Clock}]} ->
+        {accepted, NewRev, Clock};
     {ok, [{{_Id, _Rev}, Error}]} ->
         throw(Error);
     {ok, [Error]} ->
@@ -209,13 +213,24 @@ update_doc(DbName, Doc, Options) ->
 %% @doc update a list of docs
 -spec update_docs(dbname(), [#doc{}], [option()]) ->
     {ok, any()} | any().
-update_docs(DbName, Docs, Options) ->
+update_docs(DbName, Docs, Options0) ->
+    IncludeClock = proplists:get_value(clock, Options0) =/= undefined,
+    Clock = case proplists:get_value(clock, Options) of
+        true -> fabric_clock:new();
+        Clock0 -> Clock0;
+        undefined -> fabric_clock:new()
+    end,
+    Options = [{clock, Clock} | Options0],
     try
         fabric_doc_update:go(dbname(DbName), docs(Docs), opts(Options)) of
-        {ok, Results} ->
-            {ok, Results};
-        {accepted, Results} ->
+        {ok, Results, Clock} when IncludeClock ->
+            {ok, Results, Clock};
+        {accepted, Results, Clock} when IncludeClock ->
             {accepted, Results};
+        {ok, Results, _} ->
+            {ok, Results};
+        {accepted, Results, _} ->
+            {accepted, Results}
         Error ->
             throw(Error)
     catch {aborted, PreCommitFailures} ->
