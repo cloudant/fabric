@@ -25,7 +25,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 remove_down_workers(Workers, BadNode) ->
-    Filter = fun(#shard{node = Node}, _) -> Node =/= BadNode end,
+    Filter = fun(S, _) -> mem3_shard:node(S) =/= BadNode end,
     NewWorkers = fabric_dict:filter(Filter, Workers),
     case fabric_view:is_progress_possible(NewWorkers) of
     true ->
@@ -38,13 +38,15 @@ submit_jobs(Shards, EndPoint, ExtraArgs) ->
     submit_jobs(Shards, fabric_rpc, EndPoint, ExtraArgs).
 
 submit_jobs(Shards, Module, EndPoint, ExtraArgs) ->
-    lists:map(fun(#shard{node=Node, name=ShardName} = Shard) ->
+    lists:map(fun(Shard) ->
+        Node = mem3_shard:node(Shard),
+        ShardName = mem3_shard:name(Shard),
         Ref = rexi:cast(Node, {Module, EndPoint, [ShardName | ExtraArgs]}),
-        Shard#shard{ref = Ref}
+        mem3_shard:set_ref(Shard, Ref)
     end, Shards).
 
 cleanup(Workers) ->
-    [rexi:kill(Node, Ref) || #shard{node=Node, ref=Ref} <- Workers].
+    [rexi:kill(mem3_shard:node(W), mem3_shard:ref(W)) || W <- Workers].
 
 recv(Workers, Keypos, Fun, Acc0) ->
     rexi_utils:recv(Workers, Keypos, Fun, Acc0, request_timeout(), infinity).
@@ -65,12 +67,14 @@ get_db(DbName, Options) ->
     Shards = Local ++ lists:keysort(#shard.name, SameZone) ++ lists:keysort(#shard.name, DifferentZone),
     % suppress shards from down nodes
     Nodes = [node()|erlang:nodes()],
-    Live = [S || #shard{node = N} = S <- Shards, lists:member(N, Nodes)],
+    Live = [S || S <- Shards, lists:member(mem3_shard:node(S), Nodes)],
     get_shard(Live, Options, 100).
 
 get_shard([], _Opts, _Timeout) ->
     erlang:error({internal_server_error, "No DB shards could be opened."});
-get_shard([#shard{node = Node, name = Name} | Rest], Opts, Timeout) ->
+get_shard([Shard | Rest], Opts, Timeout) ->
+    Node = mem3_shard:node(Shard),
+    Name = mem3_shard:name(Shard),
     case rpc:call(Node, couch_db, open, [Name, [{timeout, Timeout} | Opts]]) of
     {ok, Db} ->
         {ok, Db};
@@ -140,7 +144,7 @@ remove_ancestors([Error | Tail], Acc) ->
     remove_ancestors(Tail, [Error | Acc]).
 
 create_monitors(Shards) ->
-    MonRefs = lists:usort([{rexi_server, N} || #shard{node=N} <- Shards]),
+    MonRefs = lists:usort([{rexi_server, mem3_shard:node(S)} || S <- Shards]),
     rexi_monitor:start(MonRefs).
 
 %% verify only id and rev are used in key.

@@ -55,8 +55,8 @@ all_dbs() ->
 -spec all_dbs(Prefix::iodata()) -> {ok, [binary()]}.
 all_dbs(Prefix) when is_binary(Prefix) ->
     Length = byte_size(Prefix),
-    MatchingDbs = mem3:fold_shards(fun(#shard{dbname=DbName}, Acc) ->
-        case DbName of
+    MatchingDbs = mem3:fold_shards(fun(Shard, Acc) ->
+        case mem3_shard:dbname(Shard) of
         <<Prefix:Length/binary, _/binary>> ->
             [DbName | Acc];
         _ ->
@@ -335,8 +335,8 @@ design_docs(DbName) ->
 %% NOTE: This function probably doesn't belong here as part fo the API
 -spec reset_validation_funs(dbname()) -> [reference()].
 reset_validation_funs(DbName) ->
-    [rexi:cast(Node, {fabric_rpc, reset_validation_funs, [Name]}) ||
-        #shard{node=Node, name=Name} <-  mem3:shards(DbName)].
+    [rexi:cast(mem3_shard:node(S), {fabric_rpc, reset_validation_funs, [mem3_shard:name(S)]}) ||
+        S <-  mem3:shards(DbName)].
 
 %% @doc clean up index files for all Dbs
 -spec cleanup_index_files() -> [ok].

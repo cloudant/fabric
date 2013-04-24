@@ -23,10 +23,12 @@ go(DbName, AllIdsRevs) ->
     go(DbName, AllIdsRevs, []).
 
 go(DbName, AllIdsRevs, Options) ->
-    Workers = lists:map(fun({#shard{name=Name, node=Node} = Shard, IdsRevs}) ->
+    Workers = lists:map(fun({Shard, IdsRevs}) ->
+        Name = mem3_shard:name(Shard),
+        Node = mem3_shard:node(Shard),
         Ref = rexi:cast(Node, {fabric_rpc, get_missing_revs, [Name, IdsRevs,
             Options]}),
-        Shard#shard{ref=Ref}
+        mem3_shard:set_ref(Shard, Ref)
     end, group_idrevs_by_shard(DbName, AllIdsRevs)),
     ResultDict = dict:from_list([{Id, {{nil,Revs},[]}} || {Id, Revs} <- AllIdsRevs]),
     RexiMon = fabric_util:create_monitors(Workers),
@@ -38,7 +40,7 @@ go(DbName, AllIdsRevs, Options) ->
     end.
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {_WorkerLen, ResultDict, Workers}) ->
-    NewWorkers = [W || #shard{node=Node} = W <- Workers, Node =/= NodeRef],
+    NewWorkers = [W || W <- Workers, mem3_shard:node(W) =/= NodeRef],
     skip_message({fabric_dict:size(NewWorkers), ResultDict, NewWorkers});
 handle_message({rexi_EXIT, _}, Worker, {W, D, Workers}) ->
     skip_message({W-1,D,lists:delete(Worker, Workers)});

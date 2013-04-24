@@ -54,7 +54,7 @@ delete_shard_db_doc(Doc) ->
     end.
 
 handle_db_update({rexi_DOWN, _, {_, Node}, _}, _Worker, {W, Counters}) ->
-    New = fabric_dict:filter(fun(S, _) -> S#shard.node =/= Node end, Counters),
+    New = fabric_dict:filter(fun(S, _) -> mem3_shard:node(S) =/= Node end, Counters),
     maybe_stop(W, New);
 
 handle_db_update({rexi_EXIT, _Reason}, Worker, {W, Counters}) ->
@@ -75,8 +75,8 @@ maybe_stop(W, Counters) ->
         {Ok,NotFound} = fabric_dict:fold(fun count_replies/3, {0,0}, Counters),
         case {Ok + NotFound, Ok, NotFound} of
         {W, 0, W} ->
-            {#shard{dbname=Name}, _} = hd(Counters),
-            twig:log(warn, "~p not_found ~s", [?MODULE, Name]),
+            {Shard, _} = hd(Counters),
+            twig:log(warn, "~p not_found ~s", [?MODULE, mem3_shard:name(Shard)]),
             {stop, not_found};
         {W, _, _} ->
             {stop, ok};

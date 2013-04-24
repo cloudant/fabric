@@ -56,7 +56,7 @@ go(DbName, Id, Options) ->
     end.
 
 handle_message({rexi_DOWN, _, {_, Node}, _}, _Worker, Acc) ->
-    NewWorkers = [W || #shard{node=N}=W <- Acc#acc.workers, N /= Node],
+    NewWorkers = [W || W <- Acc#acc.workers, mem3_shard:node(N) /= Node],
     case NewWorkers of
     [] ->
         {stop, Acc#acc{workers=[]}};

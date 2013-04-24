@@ -40,7 +40,7 @@ remove_down_shards(Collector, BadNode) ->
 is_progress_possible([]) ->
     false;
 is_progress_possible(Counters) ->
-    Ranges = fabric_dict:fold(fun(#shard{range=[X,Y]}, _, A) -> [{X,Y}|A] end,
+    Ranges = fabric_dict:fold(fun(S, _, A) -> [X,Y] = mem3_shard:range(S), [{X,Y}|A] end,
         [], Counters),
     [{Start, Tail0} | Rest] = lists:ukeysort(1, Ranges),
     Result = lists:foldl(fun
@@ -66,8 +66,12 @@ is_progress_possible(Counters) ->
 
 -spec remove_overlapping_shards(#shard{}, [{#shard{}, any()}]) ->
     [{#shard{}, any()}].
-remove_overlapping_shards(#shard{range=[A,B]} = Shard0, Shards) ->
-    fabric_dict:filter(fun(#shard{range=[X,Y], node=Node, ref=Ref} = Shard, _) ->
+remove_overlapping_shards(Shard0, Shards) ->
+    [A,B] = mem3_shard:range(Shard0),
+    fabric_dict:filter(fun(Shard, _) ->
+        [X,Y] = mem3_shard:range(Shard),
+        Node = mem3_shard:node(Shard),
+        Ref = mem3_shard:ref(Shard),
         if Shard =:= Shard0 ->
             % we can't remove ourselves
             true;

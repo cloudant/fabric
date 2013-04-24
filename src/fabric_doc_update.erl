@@ -25,9 +25,11 @@ go(_, [], _) ->
 go(DbName, AllDocs, Opts) ->
     validate_atomic_update(DbName, AllDocs, lists:member(all_or_nothing, Opts)),
     Options = lists:delete(all_or_nothing, Opts),
-    GroupedDocs = lists:map(fun({#shard{name=Name, node=Node} = Shard, Docs}) ->
+    GroupedDocs = lists:map(fun({Shard, Docs}) ->
+        Name = mem3_shard:name(Shard),
+        Node = mem3_shard:node(Shard),
         Ref = rexi:cast(Node, {fabric_rpc, update_docs, [Name, Docs, Options]}),
-        {Shard#shard{ref=Ref}, Docs}
+        {mem3_shard:set_ref(Shard, Ref), Docs}
     end, group_docs_by_shard(DbName, AllDocs)),
     {Workers, _} = lists:unzip(GroupedDocs),
     RexiMon = fabric_util:create_monitors(Workers),
@@ -51,7 +53,7 @@ go(DbName, AllDocs, Opts) ->
 
 handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Worker, Acc0) ->
     {_, LenDocs, W, GroupedDocs, DocReplyDict} = Acc0,
-    NewGrpDocs = [X || {#shard{node=N}, _} = X <- GroupedDocs, N =/= NodeRef],
+    NewGrpDocs = [X || {S, _} = X <- GroupedDocs, mem3_shard:node(S) =/= NodeRef],
     skip_message({length(NewGrpDocs), LenDocs, W, NewGrpDocs, DocReplyDict});
 
 handle_message({rexi_EXIT, _}, Worker, Acc0) ->

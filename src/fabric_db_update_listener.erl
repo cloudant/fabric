@@ -52,7 +52,9 @@ go(Parent, ParentRef, DbName, Timeout) ->
     end.
 
 start_update_notifiers(DbName) ->
-    EndPointDict = lists:foldl(fun(#shard{node=Node, name=Name}, Acc) ->
+    EndPointDict = lists:foldl(fun(Shard, Acc) ->
+        Node = mem3_shard:node(Shard),
+        Name = mem3_shard:name(Shard),
         dict:append(Node, Name, Acc)
     end, dict:new(), mem3:shards(DbName)),
     lists:map(fun({Node, DbNames}) ->

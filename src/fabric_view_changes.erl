@@ -112,18 +112,22 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
 send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
     LiveNodes = [node() | nodes()],
     AllLiveShards = mem3:live_shards(DbName, LiveNodes),
-    Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, Seq}) ->
+    Seqs = lists:flatmap(fun({Shard, Seq}) ->
+        Name = mem3_shard:name(Shard),
+        Node = mem3_shard:node(Shard),
         case lists:member(Shard, AllLiveShards) of
         true ->
             Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,Seq]}),
-            [{Shard#shard{ref = Ref}, Seq}];
+            [{mem3_shard:set_ref(Shard, Ref), Seq}];
         false ->
             % Find some replacement shards to cover the missing range
             % TODO It's possible in rare cases of shard merging to end up
             % with overlapping shard ranges from this technique
-            lists:map(fun(#shard{name=Name2, node=N2} = NewShard) ->
+            lists:map(fun(NewShard) ->
+                Name2 = mem3_shard:name(NewShard),
+                N2 = mem3_shard:node(NewShard),
                 Ref = rexi:cast(N2, {fabric_rpc, changes, [Name2,ChangesArgs,0]}),
-                {NewShard#shard{ref = Ref}, 0}
+                {mem3_shard:set_ref(NewShard, Ref), 0}
             end, find_replacement_shards(Shard, AllLiveShards))
         end
     end, unpack_seqs(PackedSeqs, DbName)),
@@ -275,7 +279,7 @@ collect_update_seqs(Seq, Shard, Counters) when is_integer(Seq) ->
     end.
 
 pack_seqs(Workers) ->
-    SeqList = [{N,R,S} || {#shard{node=N, range=R}, S} <- Workers],
+    SeqList = [{mem3_shard:node(SH),mem3_shard:range(SH),S} || {SH, S} <- Workers],
     SeqSum = lists:sum(element(2, lists:unzip(Workers))),
     Opaque = couch_util:encodeBase64Url(term_to_binary(SeqList, [compressed])),
     [SeqSum, Opaque].
@@ -342,8 +346,8 @@ do_unpack_seqs(Opaque, DbName) ->
         true ->
             Unpacked;
         false ->
-            Ranges = lists:usort([R || #shard{range=R} <- Unpacked]),
-            Filter = fun(S) -> not lists:member(S#shard.range, Ranges) end,
+            Ranges = lists:usort([mem3_shard:range(S) || S <- Unpacked]),
+            Filter = fun(S) -> not lists:member(mem3_shard:range(S), Ranges) end,
             Replacements = lists:filter(Filter, mem3:shards(DbName)),
             Unpacked ++ [{R, 0} || R <- Replacements]
     end.
@@ -359,9 +363,10 @@ changes_row(#change{key=Seq, id=Id, value=Value, doc=Doc}, true) ->
 changes_row(#change{key=Seq, id=Id, value=Value}, false) ->
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}]}}.
 
-find_replacement_shards(#shard{range=Range}, AllShards) ->
+find_replacement_shards(S, AllShards) ->
+    Range = mem3_shard:range(S),
     % TODO make this moar betta -- we might have split or merged the partition
-    [Shard || Shard <- AllShards, Shard#shard.range =:= Range].
+    [Shard || Shard <- AllShards, mem3_shard:range(Shard) =:= Range].
 
 validate_start_seq(DbName, Seq) ->
     try unpack_seqs(Seq, DbName) of _Any ->

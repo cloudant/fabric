@@ -85,7 +85,7 @@ handle_message(file_exists, _, _) ->
     {error, file_exists};
 
 handle_message({rexi_DOWN, _, {_, Node}, _}, _, Workers) ->
-    case lists:filter(fun(S) -> S#shard.node =/= Node end, Workers) of
+    case lists:filter(fun(S) -> mem3_shard:node(S) =/= Node end, Workers) of
     [] ->
         {stop, ok};
     RemainingWorkers ->
@@ -115,7 +115,7 @@ create_shard_db_doc(Doc) ->
     end.
 
 handle_db_update({rexi_DOWN, _, {_, Node}, _}, _Worker, {W, Counters}) ->
-    New = fabric_dict:filter(fun(S, _) -> S#shard.node =/= Node end, Counters),
+    New = fabric_dict:filter(fun(S, _) -> mem3_shard:node(S) =/= Node end, Counters),
     maybe_stop(W, New);
 
 handle_db_update({rexi_EXIT, _Reason}, Worker, {W, Counters}) ->
@@ -143,9 +143,12 @@ maybe_stop(W, Counters) ->
         end
     end.
 
-make_document([#shard{dbname=DbName}|_] = Shards, Suffix) ->
+make_document([Shard|_] = Shards, Suffix) ->
+    DbName = mem3_shard:dbname(Shard),
     {RawOut, ByNodeOut, ByRangeOut} =
-    lists:foldl(fun(#shard{node=N, range=[B,E]}, {Raw, ByNode, ByRange}) ->
+    lists:foldl(fun(Shard, {Raw, ByNode, ByRange}) ->
+        N = mem3_shard:node(Shard),
+        [B,E] = mem3_shard:range(Shard),
         Range = ?l2b([couch_util:to_hex(<<B:32/integer>>), "-",
             couch_util:to_hex(<<E:32/integer>>)]),
         Node = couch_util:to_binary(N),

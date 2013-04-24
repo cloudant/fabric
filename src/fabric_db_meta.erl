@@ -70,7 +70,7 @@ set_security(DbName, SecObj, Options) ->
     end.
 
 handle_set_message({rexi_DOWN, _, {_, Node}, _}, _, #acc{workers=Wrkrs}=Acc) ->
-    RemWorkers = lists:filter(fun(S) -> S#shard.node =/= Node end, Wrkrs),
+    RemWorkers = lists:filter(fun(S) -> mem3_shard:node(S) =/= Node end, Wrkrs),
     maybe_finish_set(Acc#acc{workers=RemWorkers});
 handle_set_message(ok, W, Acc) ->
     NewAcc = Acc#acc{
@@ -79,7 +79,7 @@ handle_set_message(ok, W, Acc) ->
     },
     maybe_finish_set(NewAcc);
 handle_set_message(Error, W, Acc) ->
-    Dst = {W#shard.node, W#shard.name},
+    Dst = {mem3_shard:node(W), mem3_shard:name(W)},
     twig:log(err, "Failed to set security object on ~p :: ~p", [Dst, Error]),
     NewAcc = Acc#acc{workers = (Acc#acc.workers -- [W])},
     maybe_finish_set(NewAcc).
@@ -139,7 +139,7 @@ get_all_security(DbName, Options) ->
     end.
 
 handle_get_message({rexi_DOWN, _, {_, Node}, _}, _, #acc{workers=Wrkrs}=Acc) ->
-    RemWorkers = lists:filter(fun(S) -> S#shard.node =/= Node end, Wrkrs),
+    RemWorkers = lists:filter(fun(S) -> mem3_shard:node(S) =/= Node end, Wrkrs),
     maybe_finish_get(Acc#acc{workers=RemWorkers});
 handle_get_message({Props}=SecObj, W, Acc) when is_list(Props) ->
     NewAcc = Acc#acc{
@@ -148,7 +148,7 @@ handle_get_message({Props}=SecObj, W, Acc) when is_list(Props) ->
     },
     maybe_finish_get(NewAcc);
 handle_get_message(Error, W, Acc) ->
-    Dst = {W#shard.node, W#shard.name},
+    Dst = {mem3_shard:node(W), mem3_shard:name(W)},
     twig:log(err, "Failed to get security object on ~p :: ~p", [Dst, Error]),
     NewAcc = Acc#acc{workers = (Acc#acc.workers -- [W])},
     maybe_finish_set(NewAcc).

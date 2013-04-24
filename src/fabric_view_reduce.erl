@@ -30,9 +30,11 @@ go(DbName, DDoc, VName, Args, Callback, Acc0) ->
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
-    Workers = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
+    Workers = lists:map(fun(Shard) ->
+        Name = mem3_shard:name(Shard),
+        N = mem3_shard:node(Shard),
         Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,Args]}),
-        Shard#shard{ref = Ref}
+        mem3_shard:set_ref(Shard, Ref)
     end, fabric_view:get_shards(DbName, Args)),
     RexiMon = fabric_util:create_monitors(Workers),
     #view_query_args{limit = Limit, skip = Skip} = Args,
@@ -116,9 +118,9 @@ complete_worker_test() ->
     meck:expect(config, get, fun("rexi","server_per_node",_) -> rexi_server end),
     Shards =
         mem3_util:create_partition_map("foo",3,3,[node(),node(),node()]),
-    Workers = lists:map(fun(#shard{} = Shard) ->
+    Workers = lists:map(fun(Shard) ->
                             Ref = make_ref(),
-                            Shard#shard{ref = Ref}
+                            mem3_shard:set_ref(Shard, Ref)
                         end,
                         Shards),
     State = #collector{counters=fabric_dict:init(Workers,0)},

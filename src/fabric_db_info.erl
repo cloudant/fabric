@@ -47,7 +47,8 @@ handle_message({rexi_EXIT, Reason}, Shard, {Counters, Acc}) ->
         {error, Reason}
     end;
 
-handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
+handle_message({ok, Info}, Shard, {Counters, Acc}) ->
+    Name = mem3_shard:dbname(Shard),
     case fabric_dict:lookup_element(Shard, Counters) of
     undefined ->
         % already heard from someone else in this range
