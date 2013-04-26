@@ -147,7 +147,7 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
 
 receive_results(Workers, State, Timeout, Callback) ->
     case rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, State,
-            infinity, Timeout) of
+            Timeout, infinity) of
     {timeout, NewState0} ->
         {ok, AccOut} = Callback(timeout, NewState0#collector.user_acc),
         NewState = NewState0#collector{user_acc = AccOut},
@@ -209,6 +209,22 @@ handle_message(#change{key=Seq} = Row0, {Worker, From}, St) ->
             gen_server:reply(From, stop),
             {stop, St#collector{counters=S2}}
         end
+    end;
+
+handle_message({no_pass, Seq}, {Worker, From}, St) ->
+    #collector{
+        counters = S0
+    } = St,
+    case fabric_dict:lookup_element(Worker, S0) of
+    undefined ->
+        % this worker lost the race with other partition copies, terminate it
+        gen_server:reply(From, stop),
+        {ok, St};
+    _ ->
+        S1 = fabric_dict:store(Worker, Seq, S0),
+        S2 = fabric_view:remove_overlapping_shards(Worker, S1),
+        gen_server:reply(From, ok),
+        {ok, St#collector{counters=S2}}
     end;
 
 handle_message({complete, EndSeq}, Worker, State) ->
