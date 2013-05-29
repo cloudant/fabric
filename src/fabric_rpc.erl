@@ -152,7 +152,7 @@ reduce_view(DbName, Group0, ViewName, QueryArgs) ->
         extra = Extra
     } = QueryArgs,
     set_io_priority(DbName, Extra),
-    GroupFun = group_rows_fun(GroupLevel),
+    _GroupFun = group_rows_fun(GroupLevel),
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
     {ok, Group} = couch_view_group:request_group(Pid, MinSeq),
@@ -166,13 +166,13 @@ reduce_view(DbName, Group0, ViewName, QueryArgs) ->
     case Keys of
     nil ->
         Options0 = couch_httpd_view:make_key_options(QueryArgs),
-        Options = [{key_group_fun, GroupFun} | Options0],
+        Options = [{key_group_level, GroupLevel} | Options0],
         couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options);
     _ ->
         lists:map(fun(Key) ->
             KeyArgs = QueryArgs#view_query_args{start_key=Key, end_key=Key},
             Options0 = couch_httpd_view:make_key_options(KeyArgs),
-            Options = [{key_group_fun, GroupFun} | Options0],
+            Options = [{key_group_level, GroupLevel} | Options0],
             couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options)
         end, Keys)
     end,
