@@ -398,11 +398,11 @@ reduce_fold(_Key, _Red, #view_acc{limit=0} = Acc) ->
 reduce_fold(_Key, Red, #view_acc{group_level=0} = Acc) ->
     send(null, Red, Acc);
 reduce_fold(Key, Red, #view_acc{group_level=exact} = Acc) ->
-    send(Key, Red, Acc);
+    send(couch_view:norm_json(Key), Red, Acc);
 reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0, is_list(K) ->
-    send(lists:sublist(K, I), Red, Acc);
+    send(couch_view:norm_json(lists:sublist(K, I)), Red, Acc);
 reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0 ->
-    send(K, Red, Acc).
+    send(couch_view:norm_json(K), Red, Acc).
 
 
 send(Key, Value, #view_acc{limit=Limit} = Acc) ->
