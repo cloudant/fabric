@@ -245,7 +245,8 @@ transform_row(#view_row{key=Key, id=Id, value=Value, doc=undefined}) ->
     {row, {[{id,Id}, {key,Key}, {value,Value}]}};
 transform_row(#view_row{key=Key, id=Id, value=Value, doc={error,Reason}}) ->
     {row, {[{id,Id}, {key,Key}, {value,Value}, {error,Reason}]}};
-transform_row(#view_row{key=Key, id=Id, value=Value, doc=Doc}) ->
+transform_row(#view_row{key=Key, id=Id, value=Value, doc=Doc0}) ->
+    {ok, Doc} = couch_doc_security:filter(Doc0),
     {row, {[{id,Id}, {key,Key}, {value,Value}, {doc,Doc}]}}.
 
 

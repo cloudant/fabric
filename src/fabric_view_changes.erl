@@ -386,7 +386,8 @@ changes_row(#change{key=Seq, id=Id, value=Value, deleted=true}, false) ->
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}, {deleted, true}]}};
 changes_row(#change{key=Seq, id=Id, value=Value, doc={error,Reason}}, true) ->
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}, {error,Reason}]}};
-changes_row(#change{key=Seq, id=Id, value=Value, doc=Doc}, true) ->
+changes_row(#change{key=Seq, id=Id, value=Value, doc=Doc0}, true) ->
+    {ok, Doc} = couch_doc_security:filter(Doc0),
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}, {doc,Doc}]}};
 changes_row(#change{key=Seq, id=Id, value=Value}, false) ->
     {change, {[{seq,Seq}, {id,Id}, {changes,Value}]}}.
