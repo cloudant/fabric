@@ -423,7 +423,7 @@ rev({Seq, Hash} = Rev) when is_integer(Seq), is_binary(Hash) ->
 
 %% @doc convenience method, useful when testing or calling fabric from the shell
 opts(Options) ->
-    add_option(user_ctx, add_option(io_priority, Options)).
+    add_option(snapshot, add_option(user_ctx, add_option(io_priority, Options))).
 
 add_option(Key, Options) ->
     case couch_util:get_value(Key, Options) of
