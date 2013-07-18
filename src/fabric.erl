@@ -21,7 +21,7 @@
 
 % DBs
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
-    delete_db/2, get_db_info/1, get_doc_count/1, set_revs_limit/3,
+    delete_db/2, get_db_info/1, get_db_info/2, get_doc_count/1, set_revs_limit/3,
     set_security/2, set_security/3, get_revs_limit/1, get_security/1,
     get_security/2, get_all_security/1, get_all_security/2]).
 
@@ -30,7 +30,8 @@
     update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
 
 % Views
--export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
+-export([all_docs/4, all_docs/5, changes/4, changes/5,
+    query_view/3, query_view/4, query_view/6,
     get_view_group_info/2]).
 
 % miscellany
@@ -83,7 +84,10 @@ all_dbs(Prefix) when is_list(Prefix) ->
         {disk_format_version, pos_integer()}
     ]}.
 get_db_info(DbName) ->
-    fabric_db_info:go(dbname(DbName)).
+    get_db_info(DbName, []).
+
+get_db_info(DbName, Options) ->
+    fabric_db_info:go(dbname(DbName), Options).
 
 %% @doc the number of docs in a database
 -spec get_doc_count(dbname()) -> {ok, non_neg_integer()}.
@@ -243,13 +247,15 @@ att_receiver(Req, Length) ->
     {ok, [any()]}.
 all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs) when
         is_function(Callback, 2) ->
-    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Callback, Acc0);
+    all_docs(DbName, Callback, Acc0, QueryArgs, []);
 
 %% @doc convenience function that takes a keylist rather than a record
 %% @equiv all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs))
 all_docs(DbName, Callback, Acc0, QueryArgs) ->
-    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs)).
+    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs), []).
 
+all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs, Options) ->
+    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Options, Callback, Acc0).
 
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
     {ok, any()}.

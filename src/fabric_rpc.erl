@@ -15,9 +15,11 @@
 -module(fabric_rpc).
 
 -export([get_db_info/1, get_doc_count/1, get_update_seq/1]).
+-export([get_db_info/2, get_doc_count/2, get_update_seq/2]).
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
     update_docs/3]).
 -export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
+-export([all_docs/3, changes/4]).
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
 -export([get_all_security/2]).
@@ -40,8 +42,11 @@
 %% rpc endpoints
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
-all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
-    {ok, Db} = get_or_create_db(DbName, []),
+all_docs(DbName, QueryArgs) ->
+    all_docs(DbName, QueryArgs, []).
+
+all_docs(DbName, #view_query_args{keys=nil} = QueryArgs, Options) ->
+    {ok, Db} = get_or_create_db(DbName, Options),
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
@@ -64,20 +69,24 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
         total_rows = Total
     },
     EndKeyType = if Inclusive -> end_key; true -> end_key_gt end,
-    Options = [
+    EnumOptions = [
         {dir, Dir},
         {start_key, if is_binary(StartKey) -> StartKey; true -> StartDocId end},
         {EndKeyType, if is_binary(EndKey) -> EndKey; true -> EndDocId end}
     ],
-    {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, Options),
+    {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, EnumOptions),
     final_response(Total, Acc#view_acc.offset).
+
+changes(DbName, #changes_args{} = Args, StartSeq, Options) ->
+    changes(DbName, [{extra, Options}, Args], StartSeq).
 
 changes(DbName, #changes_args{} = Args, StartSeq) ->
     changes(DbName, [Args], StartSeq);
 changes(DbName, Options, StartVector) ->
     erlang:put(io_priority, {interactive, DbName}),
     #changes_args{dir=Dir} = Args = lists:keyfind(changes_args, 1, Options),
-    case get_or_create_db(DbName, []) of
+    Extra = get_extra(Options),
+    case get_or_create_db(DbName, Extra) of
     {ok, Db} ->
         StartSeq = calculate_start_seq(Db, StartVector),
         Enum = fun changes_enumerator/2,
@@ -211,13 +220,22 @@ delete_shard_db_doc(_, DocId) ->
     rexi:reply(mem3_util:delete_db_doc(DocId)).
 
 get_db_info(DbName) ->
-    with_db(DbName, [], {couch_db, get_db_info, []}).
+    get_db_info(DbName, []).
+
+get_db_info(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_db_info, []}).
 
 get_doc_count(DbName) ->
-    with_db(DbName, [], {couch_db, get_doc_count, []}).
+    get_doc_count(DbName, []).
+
+get_doc_count(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_doc_count, []}).
 
 get_update_seq(DbName) ->
-    with_db(DbName, [], {couch_db, get_update_seq, []}).
+    get_update_seq(DbName, []).
+
+get_update_seq(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_update_seq, []}).
 
 set_security(DbName, SecObj, Options) ->
     with_db(DbName, Options, {couch_db, set_security, [SecObj]}).
@@ -561,6 +579,9 @@ owner(Node, Seq, [{EpochNode, EpochSeq} | _Rest], HighSeq)
     true;
 owner(Node, Seq, [{_EpochNode, EpochSeq} | Rest], _HighSeq) ->
     owner(Node, Seq, Rest, EpochSeq).
+
+get_extra(Options) ->
+    couch_util:get_value(extra, Options, []).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
