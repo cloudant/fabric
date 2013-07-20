@@ -115,6 +115,7 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
     Views = couch_view_group:get_views(Group),
     View = fabric_view:extract_view(Pid, ViewName, Views, ViewType),
     {ok, Total} = couch_view:get_row_count(View),
+    FoldFun = fun view_fold/3,
     Acc0 = #view_acc{
         db = Db,
         include_docs = IncludeDocs,
@@ -123,18 +124,14 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
         total_rows = Total,
         reduce_fun = fun couch_view:reduce_to_count/1
     },
-    case Keys of
+    Acc = case Keys of
     nil ->
         Options = couch_httpd_view:make_key_options(QueryArgs),
-        {ok, _, Acc} = couch_view:fold(View, fun view_fold/3, Acc0, Options);
+        {ok, _, Acc1} = couch_view:fold(View, FoldFun, Acc0, Options),
+        Acc1;
     _ ->
-        Acc = lists:foldl(fun(Key, AccIn) ->
-            KeyArgs = QueryArgs#view_query_args{start_key=Key, end_key=Key},
-            Options = couch_httpd_view:make_key_options(KeyArgs),
-            {_Go, _, Out} = couch_view:fold(View, fun view_fold/3, AccIn,
-                Options),
-            Out
-        end, Acc0, Keys)
+        {ok, _, Acc2} = couch_view:get_map_keys(View, Keys, FoldFun, Acc0),
+        Acc2
     end,
     final_response(Total, Acc#view_acc.offset).
 
