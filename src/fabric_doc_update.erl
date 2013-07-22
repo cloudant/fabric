@@ -47,7 +47,7 @@ go(DbName, AllDocs, Opts) ->
         num_docs = length(AllDocs),
         w = list_to_integer(W),
         grouped_docs = GroupedDocs,
-        replies = dict:from_list([{Doc, []} || Doc <- AllDocs])
+        reply_dict = dict:from_list([{Doc, []} || Doc <- AllDocs])
     },
     Timeout = fabric_util:request_timeout(),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, Acc0, infinity, Timeout) of
@@ -56,8 +56,8 @@ go(DbName, AllDocs, Opts) ->
     {timeout, Acc} ->
         #acc{
             w = W1,
-            reply_doc = DocReplyDict
-        } = Acc0,
+            reply_dict = DocReplyDict
+        } = Acc,
         {Health, _, Resp} = dict:fold(fun force_reply/3, {ok, W1, []},
             DocReplyDict),
         {Health, [R || R <- couch_util:reorder_results(AllDocs, Resp), R =/= noreply]};
@@ -90,7 +90,7 @@ handle_message(internal_server_error, Worker, Acc0) ->
     % happens when we fail to load validation functions in an RPC worker
     #acc{
         num_workers = NumWorkers,
-        grouped_docs = GroupeDocs
+        grouped_docs = GroupedDocs
     } = Acc0,
     skip_message(Acc0#acc{
         num_workers = NumWorkers - 1,
@@ -119,7 +119,7 @@ handle_message({ok, Replies}, Worker, Acc0) ->
         continue ->
             {ok, Acc0#acc{
                 num_workers = NumWorkers - 1,
-                doc_count = DocCount,
+                num_docs = DocCount,
                 grouped_docs = NewGrpDocs,
                 reply_dict = DocReplyDict
             }};
@@ -203,7 +203,7 @@ append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
     append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
 
 
-skip_message(#acc{num_workers = 0, w = W, reply_dic = ReplyDict}) ->
+skip_message(#acc{num_workers = 0, w = W, reply_dict = ReplyDict}) ->
     {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []}, ReplyDict),
     {stop, {Health, Reply}};
 skip_message(Acc0) ->

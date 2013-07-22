@@ -38,7 +38,7 @@ to_string(#fabric_clock{members=Members}) ->
         dict:append(Node, {Range, Seq}, Acc)
     end, dict:new(), Members),
     ByNode0 = dict:to_list(ByNodeDict),
-    ByNode1 = [{atom_to_list(Node), Vals} || {Node, Vals} <- ByNode0]
+    ByNode1 = [{atom_to_list(Node), Vals} || {Node, Vals} <- ByNode0],
     couch_util:encodeBase64Url(term_to_binary({?CURRENT_VERSION, ByNode1})).
 
 
@@ -60,7 +60,7 @@ from_string({Version, Data}, Clock) ->
 
 
 from_string(1, Members, Clock) ->
-    #fabric_clock{
+    Clock#fabric_clock{
         members = dedupe(v1_members(Members, []))
     }.
 
@@ -68,7 +68,7 @@ from_string(1, Members, Clock) ->
 v1_members([], Acc) ->
     Acc;
 v1_members([{NodeList, Vals} | Rest], Acc) when is_list(NodeList) ->
-    Node = list_to_existing_atom(Node0),
+    Node = list_to_existing_atom(NodeList),
     ValidateFun = fun({[Beg, End], Seq}) ->
         true = is_number(Beg),
         true = is_number(End),

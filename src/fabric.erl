@@ -215,10 +215,10 @@ update_doc(DbName, Doc, Options) ->
     {ok, any()} | any().
 update_docs(DbName, Docs, Options0) ->
     IncludeClock = proplists:get_value(clock, Options0) =/= undefined,
-    Clock = case proplists:get_value(clock, Options) of
+    Clock = case proplists:get_value(clock, Options0) of
         true -> fabric_clock:new();
-        Clock0 -> Clock0;
-        undefined -> fabric_clock:new()
+        undefined -> fabric_clock:new();
+        Clock0 -> Clock0
     end,
     Options = [{clock, Clock} | Options0],
     try
@@ -230,7 +230,7 @@ update_docs(DbName, Docs, Options0) ->
         {ok, Results, _} ->
             {ok, Results};
         {accepted, Results, _} ->
-            {accepted, Results}
+            {accepted, Results};
         Error ->
             throw(Error)
     catch {aborted, PreCommitFailures} ->
