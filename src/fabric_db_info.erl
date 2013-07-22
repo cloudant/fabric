@@ -91,6 +91,8 @@ merge_results(Info) ->
             [{other, {merge_other_results(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
+        (snapshots, X, Acc) ->
+            [{snapshots, {merge_snapshots(X)}} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).
@@ -105,3 +107,10 @@ merge_other_results(Results) ->
         (_, _, Acc) ->
             Acc
     end, [], Dict).
+
+merge_snapshots(Results) ->
+    Dict = lists:foldl(fun({Props}, D) ->
+        lists:foldl(fun({K,V},D0) -> orddict:append(K,V,D0) end, D, Props)
+    end, orddict:new(), Results),
+    orddict:fold(fun(Name, X, Acc) -> [{Name, lists:sum(X)} | Acc] end,
+                 [], Dict).
