@@ -15,6 +15,7 @@
 -module(fabric_db_meta).
 
 -export([set_revs_limit/3, set_security/3, get_all_security/2]).
+-export([create_snapshot/4, delete_snapshot/3]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -163,3 +164,43 @@ maybe_finish_get(#acc{workers=[]}=Acc) ->
     {stop, Acc};
 maybe_finish_get(Acc) ->
     {ok, Acc}.
+
+create_snapshot(DbName, SName, Body, Options) ->
+    Shards = mem3:shards(DbName),
+    Workers = fabric_util:submit_jobs(Shards, create_snapshot,
+                                      [SName, Body, Options]),
+    Handler = fun handle_create_snapshot_message/3,
+    Waiting = length(Workers) - 1,
+    case fabric_util:recv(Workers, #shard.ref, Handler, Waiting) of
+    {ok, ok} ->
+        ok;
+    Error ->
+        Error
+    end.
+
+handle_create_snapshot_message({ok, _Snapshot}, _, 0) ->
+    {stop, ok};
+handle_create_snapshot_message({ok, _Snapshot}, _, Waiting) ->
+    {ok, Waiting - 1};
+handle_create_snapshot_message(Error, _, _Waiting) ->
+    {error, Error}.
+
+delete_snapshot(DbName, SName, Options) ->
+    Shards = mem3:shards(DbName),
+    Workers = fabric_util:submit_jobs(Shards, delete_snapshot,
+                                      [SName, Options]),
+    Handler = fun handle_delete_snapshot_message/3,
+    Waiting = length(Workers) - 1,
+    case fabric_util:recv(Workers, #shard.ref, Handler, Waiting) of
+    {ok, ok} ->
+        ok;
+    Error ->
+        Error
+    end.
+
+handle_delete_snapshot_message(ok, _, 0) ->
+    {stop, ok};
+handle_delete_snapshot_message(ok, _, Waiting) ->
+    {ok, Waiting - 1};
+handle_delete_snapshot_message(Error, _, _Waiting) ->
+    {error, Error}.

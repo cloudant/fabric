@@ -23,7 +23,8 @@
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
     delete_db/2, get_db_info/1, get_db_info/2, get_doc_count/1, set_revs_limit/3,
     set_security/2, set_security/3, get_revs_limit/1, get_security/1,
-    get_security/2, get_all_security/1, get_all_security/2]).
+    get_security/2, get_all_security/1, get_all_security/2,
+    get_snapshots/2, get_snapshot/3, create_snapshot/4, delete_snapshot/3]).
 
 % Documents
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
@@ -157,6 +158,33 @@ get_all_security(DbName) ->
 -spec get_all_security(dbname(), [option()]) -> json_obj() | no_return().
 get_all_security(DbName, Options) ->
     fabric_db_meta:get_all_security(dbname(DbName), opts(Options)).
+
+%% @doc retrieve the snapshots for a database
+-spec get_snapshots(dbname(), [option()]) -> json_obj() | no_return().
+get_snapshots(DbName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshots(Db) after catch couch_db:close(Db) end.
+
+%% @doc retrieve specific snapshot for a database
+-spec get_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+get_snapshot(DbName, SName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshot(Db, SName) after catch couch_db:close(Db) end.
+
+%% @doc create a new snapshot of a database
+-spec create_snapshot(dbname(), iodata(), json_obj(), [option()]) ->
+                             json_obj() | no_return().
+create_snapshot(DbName, SName, Body, Options) ->
+    fabric_db_meta:create_snapshot(dbname(DbName), SName,
+                                   Body, opts(Options)).
+
+%% @doc delete specific snapshot for a database
+-spec delete_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+delete_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:delete_snapshot(dbname(DbName), SName,
+                                   opts(Options)).
 
 % doc operations
 
