@@ -91,6 +91,8 @@ merge_results(Info) ->
             [{other, {merge_other_results(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
+        (snapshots, X, Acc) ->
+            [{snapshots, lists:max(X)} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).
