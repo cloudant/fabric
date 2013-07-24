@@ -24,7 +24,8 @@
     delete_db/2, get_db_info/1, get_db_info/2, get_doc_count/1, set_revs_limit/3,
     set_security/2, set_security/3, get_revs_limit/1, get_security/1,
     get_security/2, get_all_security/1, get_all_security/2,
-    get_snapshots/2, get_snapshot/3, create_snapshot/4, delete_snapshot/3]).
+    get_snapshots/2, get_snapshot/3, create_snapshot/4, delete_snapshot/3,
+    restore_snapshot/3]).
 
 % Documents
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
@@ -186,6 +187,13 @@ delete_snapshot(DbName, SName, Options) ->
     fabric_db_meta:delete_snapshot(dbname(DbName), SName,
                                    opts(Options)).
 
+%% @doc restore specific snapshot for a database
+-spec restore_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+restore_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:restore_snapshot(dbname(DbName), SName,
+                                    opts(Options)).
+
 % doc operations
 
 %% @doc retrieve the doc with a given id
@@ -288,13 +296,17 @@ all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs, Options) ->
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
     {ok, any()}.
 changes(DbName, Callback, Acc0, #changes_args{}=Options) ->
-    Feed = Options#changes_args.feed,
-    fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0);
+    changes(DbName, Callback, Acc0, Options, []);
 
 %% @doc convenience function, takes keylist instead of record
 %% @equiv changes(DbName, Callback, Acc0, kl_to_changes_args(Options))
 changes(DbName, Callback, Acc0, Options) ->
-    changes(DbName, Callback, Acc0, kl_to_changes_args(Options)).
+    changes(DbName, Callback, Acc0, kl_to_changes_args(Options), []).
+
+changes(DbName, Callback, Acc0, #changes_args{}=Args, Extra) ->
+    Feed = Args#changes_args.feed,
+    Options = [{extra, Extra}, Args],
+    fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0).
 
 %% @equiv query_view(DbName, DesignName, ViewName, #view_query_args{})
 query_view(DbName, DesignName, ViewName) ->

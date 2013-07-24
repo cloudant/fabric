@@ -15,7 +15,7 @@
 -module(fabric_db_meta).
 
 -export([set_revs_limit/3, set_security/3, get_all_security/2]).
--export([create_snapshot/4, delete_snapshot/3]).
+-export([create_snapshot/4, delete_snapshot/3, restore_snapshot/3]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -166,30 +166,18 @@ maybe_finish_get(Acc) ->
     {ok, Acc}.
 
 create_snapshot(DbName, SName, Body, Options) ->
-    Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, create_snapshot,
-                                      [SName, Body, Options]),
-    Handler = fun handle_create_snapshot_message/3,
-    Waiting = length(Workers) - 1,
-    case fabric_util:recv(Workers, #shard.ref, Handler, Waiting) of
-    {ok, ok} ->
-        ok;
-    Error ->
-        Error
-    end.
-
-handle_create_snapshot_message({ok, _Snapshot}, _, 0) ->
-    {stop, ok};
-handle_create_snapshot_message({ok, _Snapshot}, _, Waiting) ->
-    {ok, Waiting - 1};
-handle_create_snapshot_message(Error, _, _Waiting) ->
-    {error, Error}.
+    snapshot(DbName, create_snapshot, [SName, Body, Options]).
 
 delete_snapshot(DbName, SName, Options) ->
+    snapshot(DbName, delete_snapshot, [SName, Options]).
+
+restore_snapshot(DbName, SName, Options) ->
+    snapshot(DbName, restore_snapshot, [SName, Options]).
+
+snapshot(DbName, Fun, Options) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, delete_snapshot,
-                                      [SName, Options]),
-    Handler = fun handle_delete_snapshot_message/3,
+    Workers = fabric_util:submit_jobs(Shards, Fun, Options),
+    Handler = fun handle_snapshot_message/3,
     Waiting = length(Workers) - 1,
     case fabric_util:recv(Workers, #shard.ref, Handler, Waiting) of
     {ok, ok} ->
@@ -198,9 +186,13 @@ delete_snapshot(DbName, SName, Options) ->
         Error
     end.
 
-handle_delete_snapshot_message(ok, _, 0) ->
+handle_snapshot_message(ok, _, 0) ->
     {stop, ok};
-handle_delete_snapshot_message(ok, _, Waiting) ->
+handle_snapshot_message({ok, _}, _, 0) ->
+    {stop, ok};
+handle_snapshot_message(ok, _, Waiting) ->
     {ok, Waiting - 1};
-handle_delete_snapshot_message(Error, _, _Waiting) ->
+handle_snapshot_message({ok, _}, _, Waiting) ->
+    {ok, Waiting - 1};
+handle_snapshot_message(Error, _, _Waiting) ->
     {error, Error}.

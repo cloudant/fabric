@@ -23,7 +23,7 @@
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
 -export([get_all_security/2]).
--export([create_snapshot/4, delete_snapshot/3]).
+-export([create_snapshot/4, delete_snapshot/3, restore_snapshot/3]).
 
 -include("fabric.hrl").
 -include_lib("couch/include/couch_db.hrl").
@@ -302,6 +302,9 @@ create_snapshot(DbName, SName, Body, Options) ->
 
 delete_snapshot(DbName, SName, Options) ->
     with_db(DbName, Options, {couch_db, delete_snapshot, [SName]}).
+
+restore_snapshot(DbName, SName, Options) ->
+    with_db(DbName, Options, {couch_db, restore_snapshot, [SName]}).
 
 %%
 %% internal

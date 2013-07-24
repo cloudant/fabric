@@ -26,11 +26,12 @@
 go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
         Feed == "longpoll" ->
     Args = make_changes_args(Options),
+    #changes_args{} = ChangesArgs = extract_changes_args(Args),
     Since = get_start_seq(DbName, Args),
     case validate_start_seq(DbName, Since) of
     ok ->
         {ok, Acc} = Callback(start, Acc0),
-        {Timeout, _} = couch_changes:get_changes_timeout(Args, Callback),
+        {Timeout, _} = couch_changes:get_changes_timeout(ChangesArgs, Callback),
         Ref = make_ref(),
         Parent = self(),
         UpdateListener = {spawn_link(fabric_db_update_listener, go,
@@ -39,7 +40,7 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
         try
             keep_sending_changes(
                 DbName,
-                Args,
+                ChangesArgs,
                 Callback,
                 Since,
                 Acc,
@@ -74,7 +75,8 @@ go(DbName, "normal", Options, Callback, Acc0) ->
     end.
 
 keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0) ->
-    #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} = Args,
+    #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} =
+        ChangesArgs = extract_changes_args(Args),
     {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout),
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
     LastSeq = pack_seqs(NewSeqs),
@@ -98,7 +100,7 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
             {ok, AccTimeout} = Callback(timeout, AccOut),
             keep_sending_changes(
                 DbName,
-                Args#changes_args{limit=Limit2},
+                update_changes_args(Args, ChangesArgs#changes_args{limit=Limit2}),
                 Callback,
                 LastSeq,
                 AccTimeout,
@@ -134,7 +136,7 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
         callback = Callback,
         counters = orddict:from_list(Seqs),
         user_acc = AccIn,
-        limit = ChangesArgs#changes_args.limit,
+        limit = (extract_changes_args(ChangesArgs))#changes_args.limit,
         rows = Seqs % store sequence positions instead
     },
     %% TODO: errors need to be handled here
@@ -181,12 +183,13 @@ handle_message(_, _, #collector{limit=0} = State) ->
 
 handle_message(#change{key=Key} = Row0, {Worker, From}, St) ->
     #collector{
-        query_args = #changes_args{include_docs=IncludeDocs},
+        query_args = Args,
         callback = Callback,
         counters = S0,
         limit = Limit,
         user_acc = AccIn
     } = St,
+    #changes_args{include_docs=IncludeDocs} = extract_changes_args(Args),
     case fabric_dict:lookup_element(Worker, S0) of
     undefined ->
         % this worker lost the race with other partition copies, terminate it
@@ -260,11 +263,25 @@ handle_message({complete, Key}, Worker, State) ->
         end
     end.
 
+make_changes_args(Options) when is_list(Options) ->
+    #changes_args{} = Args0 = extract_changes_args(Options),
+    update_changes_args(Options, make_changes_args(Args0));
 make_changes_args(#changes_args{style=Style, filter=undefined}=Args) ->
     Args#changes_args{filter = Style};
 make_changes_args(Args) ->
     Args.
 
+extract_changes_args(Options) when is_list(Options) ->
+    lists:keyfind(changes_args, 1, Options);
+extract_changes_args(#changes_args{}=Args) ->
+    Args.
+
+update_changes_args(Options, #changes_args{}=NewArgs) when is_list(Options) ->
+    lists:keyreplace(changes_args, 1, Options, NewArgs).
+
+get_start_seq(DbName, Options) when is_list(Options) ->
+    #changes_args{} = Args = extract_changes_args(Options),
+    get_start_seq(DbName, Args);
 get_start_seq(_DbName, #changes_args{dir=fwd, since=Since}) ->
     Since;
 get_start_seq(DbName, #changes_args{dir=rev}) ->
