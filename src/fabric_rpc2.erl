@@ -161,18 +161,25 @@ reduce_view(DbName, Group0, ViewName, QueryArgs) ->
     {NthRed, View} = fabric_view:extract_view(Pid, ViewName, Views, reduce),
     ReduceView = {reduce, NthRed, Lang, View},
     Acc0 = #view_acc{group_level = GroupLevel, limit = Limit+Skip},
-    case Keys of
+    FoldRet = case Keys of
     nil ->
         Options0 = couch_httpd_view:make_key_options(QueryArgs),
         Options = [{key_group_level, GroupLevel} | Options0],
         couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options);
     _ ->
-        lists:map(fun(Key) ->
+        lists:foldl(fun(Key, FAcc) ->
             KeyArgs = QueryArgs#view_query_args{start_key=Key, end_key=Key},
             Options0 = couch_httpd_view:make_key_options(KeyArgs),
             Options = [{key_group_level, GroupLevel} | Options0],
-            couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options)
-        end, Keys)
+            couch_view:fold_reduce(ReduceView, fun reduce_fold/3, FAcc, Options)
+        end, Acc0, Keys)
+    end,
+    case FoldRet of
+        {ok, #view_acc{offset=nil}} ->
+            % Stream not yet started
+            rexi:stream_init();
+        _ ->
+            ok
     end,
     rexi:reply(complete).
 
@@ -387,6 +394,9 @@ group_rows_fun(GroupLevel) when is_integer(GroupLevel) ->
 
 reduce_fold(_Key, _Red, #view_acc{limit=0} = Acc) ->
     {stop, Acc};
+reduce_fold(Key, Red, #view_acc{offset=nil}=Acc) ->
+    rexi:stream_init(),
+    reduce_fold(Key, Red, Acc#view_acc{offset=streaming});
 reduce_fold(_Key, Red, #view_acc{group_level=0} = Acc) ->
     send(null, Red, Acc);
 reduce_fold(Key, Red, #view_acc{group_level=exact} = Acc) ->
@@ -398,24 +408,8 @@ reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0 ->
 
 
 send(Key, Value, #view_acc{limit=Limit} = Acc) ->
-    case put(fabric_sent_first_row, true) of
-    undefined ->
-        case rexi:sync_reply(#view_row{key=Key, value=Value}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        stop ->
-            exit(normal);
-        timeout ->
-            exit(timeout)
-        end;
-    true ->
-        case rexi:stream(#view_row{key=Key, value=Value}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        timeout ->
-            exit(timeout)
-        end
-    end.
+    rexi:stream(#view_row{key=Key, value=Value}),
+    {ok, Acc#view_acc{limit=Limit-1}}.
 
 changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
         {Db, _OldSeq, Args, Options}) ->
