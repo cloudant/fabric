@@ -82,10 +82,13 @@ changes(DbName, Options, StartVector) ->
         StartSeq = calculate_start_seq(Db, node(), StartVector),
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args, Options},
+        Acc0 = {Db, StartSeq, Args, Options, false},
         try
-            {ok, {_, LastSeq, _, _}} =
+            {ok, {_, LastSeq, _, _, Started}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
+            if Started == true -> ok; true ->
+                rexi:stream_init()
+            end,
             rexi:reply({complete, {LastSeq, uuid(Db)}})
         after
             couch_db:close(Db)
@@ -411,10 +414,13 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
     rexi:stream(#view_row{key=Key, value=Value}),
     {ok, Acc#view_acc{limit=Limit-1}}.
 
+changes_enumerator(DocInfo, {Db, Seq, Args, Options, false}) ->
+    rexi:stream_init(),
+    changes_enumerator(DocInfo, {Db, Seq, Args, Options, true});
 changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
-        {Db, _OldSeq, Args, Options}) ->
-    {ok, {Db, Seq, Args, Options}};
-changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
+        {Db, _OldSeq, Args, Options, Started}) ->
+    {ok, {Db, Seq, Args, Options, Started}};
+changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Started}) ->
     #changes_args{
         include_docs = IncludeDocs,
         filter = Acc
@@ -423,12 +429,12 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     #doc_info{high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
     case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
     [] ->
-        {ok, {Db, Seq, Args, Options}};
+        {ok, {Db, Seq, Args, Options, Started}};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
-        Go = rexi:sync_reply(ChangesRow),
-        {Go, {Db, Seq, Args, Options}}
+        rexi:stream(ChangesRow),
+        {ok, {Db, Seq, Args, Options, Started}}
     end.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
