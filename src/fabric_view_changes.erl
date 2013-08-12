@@ -79,7 +79,8 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
     LastSeq = pack_seqs(NewSeqs),
     MaintenanceMode = config:get("cloudant", "maintenance_mode"),
-    if Limit > Limit2, Feed == "longpoll"; MaintenanceMode == "true" ->
+    if Limit > Limit2, Feed == "longpoll";
+       MaintenanceMode == "true"; MaintenanceMode == "nolb" ->
         Callback({stop, LastSeq}, AccOut);
     true ->
         WaitForUpdate = wait_db_updated(UpListen),
