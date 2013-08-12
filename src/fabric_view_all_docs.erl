@@ -14,15 +14,15 @@
 
 -module(fabric_view_all_docs).
 
--export([go/4]).
+-export([go/5]).
 -export([open_doc/3]). % exported for spawn
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
-    Workers = fabric_util:submit_jobs(mem3:shards(DbName),all_docs,[QueryArgs]),
+go(DbName, #view_query_args{keys=nil} = QueryArgs, Options, Callback, Acc0) ->
+    Workers = fabric_util:submit_jobs(mem3:shards(DbName),all_docs,[QueryArgs, Options]),
     #view_query_args{limit = Limit, skip = Skip} = QueryArgs,
     State = #collector{
         query_args = QueryArgs,
@@ -47,7 +47,7 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
     end;
 
 
-go(DbName, QueryArgs, Callback, Acc0) ->
+go(DbName, QueryArgs, Options, Callback, Acc0) ->
     #view_query_args{
         direction = Dir,
         include_docs = IncludeDocs,

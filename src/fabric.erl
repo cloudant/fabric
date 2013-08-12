@@ -21,16 +21,19 @@
 
 % DBs
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
-    delete_db/2, get_db_info/1, get_doc_count/1, set_revs_limit/3,
+    delete_db/2, get_db_info/1, get_db_info/2, get_doc_count/1, set_revs_limit/3,
     set_security/2, set_security/3, get_revs_limit/1, get_security/1,
-    get_security/2, get_all_security/1, get_all_security/2]).
+    get_security/2, get_all_security/1, get_all_security/2,
+    get_snapshots/2, get_snapshot/3, create_snapshot/4, delete_snapshot/3,
+    restore_snapshot/3]).
 
 % Documents
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
     update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
 
 % Views
--export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
+-export([all_docs/4, all_docs/5, changes/4, changes/5,
+    query_view/3, query_view/4, query_view/6,
     get_view_group_info/2]).
 
 % miscellany
@@ -83,7 +86,10 @@ all_dbs(Prefix) when is_list(Prefix) ->
         {disk_format_version, pos_integer()}
     ]}.
 get_db_info(DbName) ->
-    fabric_db_info:go(dbname(DbName)).
+    get_db_info(DbName, []).
+
+get_db_info(DbName, Options) ->
+    fabric_db_info:go(dbname(DbName), Options).
 
 %% @doc the number of docs in a database
 -spec get_doc_count(dbname()) -> {ok, non_neg_integer()}.
@@ -153,6 +159,40 @@ get_all_security(DbName) ->
 -spec get_all_security(dbname(), [option()]) -> json_obj() | no_return().
 get_all_security(DbName, Options) ->
     fabric_db_meta:get_all_security(dbname(DbName), opts(Options)).
+
+%% @doc retrieve the snapshots for a database
+-spec get_snapshots(dbname(), [option()]) -> json_obj() | no_return().
+get_snapshots(DbName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshots(Db) after catch couch_db:close(Db) end.
+
+%% @doc retrieve specific snapshot for a database
+-spec get_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+get_snapshot(DbName, SName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshot(Db, SName) after catch couch_db:close(Db) end.
+
+%% @doc create a new snapshot of a database
+-spec create_snapshot(dbname(), iodata(), json_obj(), [option()]) ->
+                             json_obj() | no_return().
+create_snapshot(DbName, SName, Body, Options) ->
+    fabric_db_meta:create_snapshot(dbname(DbName), SName,
+                                   Body, opts(Options)).
+
+%% @doc delete specific snapshot for a database
+-spec delete_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+delete_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:delete_snapshot(dbname(DbName), SName,
+                                   opts(Options)).
+
+%% @doc restore specific snapshot for a database
+-spec restore_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+restore_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:restore_snapshot(dbname(DbName), SName,
+                                    opts(Options)).
 
 % doc operations
 
@@ -243,24 +283,30 @@ att_receiver(Req, Length) ->
     {ok, [any()]}.
 all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs) when
         is_function(Callback, 2) ->
-    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Callback, Acc0);
+    all_docs(DbName, Callback, Acc0, QueryArgs, []);
 
 %% @doc convenience function that takes a keylist rather than a record
 %% @equiv all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs))
 all_docs(DbName, Callback, Acc0, QueryArgs) ->
-    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs)).
+    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs), []).
 
+all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs, Options) ->
+    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Options, Callback, Acc0).
 
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
     {ok, any()}.
 changes(DbName, Callback, Acc0, #changes_args{}=Options) ->
-    Feed = Options#changes_args.feed,
-    fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0);
+    changes(DbName, Callback, Acc0, Options, []);
 
 %% @doc convenience function, takes keylist instead of record
 %% @equiv changes(DbName, Callback, Acc0, kl_to_changes_args(Options))
 changes(DbName, Callback, Acc0, Options) ->
-    changes(DbName, Callback, Acc0, kl_to_changes_args(Options)).
+    changes(DbName, Callback, Acc0, kl_to_changes_args(Options), []).
+
+changes(DbName, Callback, Acc0, #changes_args{}=Args, Extra) ->
+    Feed = Args#changes_args.feed,
+    Options = [{extra, Extra}, Args],
+    fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0).
 
 %% @equiv query_view(DbName, DesignName, ViewName, #view_query_args{})
 query_view(DbName, DesignName, ViewName) ->
@@ -423,7 +469,7 @@ rev({Seq, Hash} = Rev) when is_integer(Seq), is_binary(Hash) ->
 
 %% @doc convenience method, useful when testing or calling fabric from the shell
 opts(Options) ->
-    add_option(user_ctx, add_option(io_priority, Options)).
+    add_option(snapshot, add_option(user_ctx, add_option(io_priority, Options))).
 
 add_option(Key, Options) ->
     case couch_util:get_value(Key, Options) of

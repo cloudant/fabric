@@ -14,14 +14,17 @@
 
 -module(fabric_db_info).
 
--export([go/1]).
+-export([go/1, go/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 
 go(DbName) ->
+    go(DbName, []).
+
+go(DbName, Options) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, get_db_info, []),
+    Workers = fabric_util:submit_jobs(Shards, get_db_info, [Options]),
     RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil), []},
     try
@@ -88,6 +91,8 @@ merge_results(Info) ->
             [{other, {merge_other_results(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
+        (snapshots, X, Acc) ->
+            [{snapshots, {merge_snapshots(X)}} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).
@@ -102,3 +107,10 @@ merge_other_results(Results) ->
         (_, _, Acc) ->
             Acc
     end, [], Dict).
+
+merge_snapshots(Results) ->
+    Dict = lists:foldl(fun({Props}, D) ->
+        lists:foldl(fun({K,V},D0) -> orddict:append(K,V,D0) end, D, Props)
+    end, orddict:new(), Results),
+    orddict:fold(fun(Name, X, Acc) -> [{Name, lists:sum(X)} | Acc] end,
+                 [], Dict).
