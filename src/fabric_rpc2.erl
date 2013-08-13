@@ -325,15 +325,10 @@ view_fold(#full_doc_info{} = FullDocInfo, OffsetReds, Acc) ->
 view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total} = Acc) ->
     % calculates the offset for this shard
     #view_acc{reduce_fun=Reduce} = Acc,
+    rexi:stream_init(),
     Offset = Reduce(OffsetReds),
-    case rexi:sync_reply({total_and_offset, Total, Offset}) of
-    ok ->
-        view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
-    stop ->
-        exit(normal);
-    timeout ->
-        exit(timeout)
-    end;
+    rexi:stream({total_and_offset, Total, Offset}),
+    view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
 view_fold(_KV, _Offset, #view_acc{limit=0} = Acc) ->
     % we scanned through limit+skip local rows
     {stop, Acc};
@@ -368,21 +363,13 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
     true ->
         Doc = undefined
     end,
-    case rexi:stream(#view_row{key=Key, id=Id, value=Value, doc=Doc}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        timeout ->
-            exit(timeout)
-    end.
+    rexi:stream(#view_row{key=Key, id=Id, value=Value, doc=Doc}),
+    {ok, Acc#view_acc{limit=Limit-1}}.
 
 final_response(Total, nil) ->
-    case rexi:sync_reply({total_and_offset, Total, Total}) of ok ->
-        rexi:reply(complete);
-    stop ->
-        ok;
-    timeout ->
-        exit(timeout)
-    end;
+    rexi:stream_init(),
+    rexi:stream({total_and_offset, Total, Total}),
+    rexi:reply(complete);
 final_response(_Total, _Offset) ->
     rexi:reply(complete).
 
