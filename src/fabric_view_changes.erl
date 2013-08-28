@@ -14,7 +14,7 @@
 
 -module(fabric_view_changes).
 
--export([go/5, pack_seqs/1, unpack_seqs/2]).
+-export([go/5, go/6, pack_seqs/1, unpack_seqs/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -23,10 +23,14 @@
 
 -import(fabric_db_update_listener, [wait_db_updated/1]).
 
-go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
+%% @equiv go(DbName, Feed, Options, [], Callback, Acc0)
+go(DbName, Feed, Options, Callback, Acc0) ->
+    go(DbName, Feed, Options, [], Callback, Acc0).
+
+go(DbName, Feed, Options, DbOptions, Callback, Acc0) when Feed == "continuous" orelse
         Feed == "longpoll" ->
     Args = make_changes_args(Options),
-    Since = get_start_seq(DbName, Args),
+    Since = get_start_seq(DbName, Args, DbOptions),
     case validate_start_seq(DbName, Since) of
     ok ->
         {ok, Acc} = Callback(start, Acc0),
@@ -40,6 +44,7 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
             keep_sending_changes(
                 DbName,
                 Args,
+                DbOptions,
                 Callback,
                 Since,
                 Acc,
@@ -54,15 +59,16 @@ go(DbName, Feed, Options, Callback, Acc0) when Feed == "continuous" orelse
         Callback(Error, Acc0)
     end;
 
-go(DbName, "normal", Options, Callback, Acc0) ->
+go(DbName, "normal", Options, DbOptions, Callback, Acc0) ->
     Args = make_changes_args(Options),
-    Since = get_start_seq(DbName, Args),
+    Since = get_start_seq(DbName, Args, DbOptions),
     case validate_start_seq(DbName, Since) of
     ok ->
         {ok, Acc} = Callback(start, Acc0),
         {ok, #collector{counters=Seqs, user_acc=AccOut}} = send_changes(
             DbName,
             Args,
+            DbOptions,
             Callback,
             Since,
             Acc,
@@ -73,7 +79,7 @@ go(DbName, "normal", Options, Callback, Acc0) ->
         Callback(Error, Acc0)
     end.
 
-keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0) ->
+keep_sending_changes(DbName, Args, DbOptions, Callback, Seqs, AccIn, Timeout, UpListen, T0) ->
     #changes_args{limit=Limit, feed=Feed, heartbeat=Heartbeat} = Args,
     {ok, Collector} = send_changes(DbName, Args, Callback, Seqs, AccIn, Timeout),
     #collector{limit=Limit2, counters=NewSeqs, user_acc=AccOut} = Collector,
@@ -101,6 +107,7 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
             keep_sending_changes(
                 DbName,
                 Args#changes_args{limit=Limit2},
+                DbOptions,
                 Callback,
                 LastSeq,
                 AccTimeout,
@@ -112,19 +119,22 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
     end.
 
 send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
+    send_changes(DbName, ChangesArgs, [], Callback, PackedSeqs, AccIn, Timeout).
+
+send_changes(DbName, ChangesArgs, DbOptions, Callback, PackedSeqs, AccIn, Timeout) ->
     LiveNodes = [node() | nodes()],
     AllLiveShards = mem3:live_shards(DbName, LiveNodes),
     Seqs = lists:flatmap(fun({#shard{name=Name, node=N} = Shard, Seq}) ->
         case lists:member(Shard, AllLiveShards) of
         true ->
-            Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,Seq]}),
+            Ref = rexi:cast(N, {fabric_rpc, changes, [Name,ChangesArgs,Seq,DbOptions]}),
             [{Shard#shard{ref = Ref}, Seq}];
         false ->
             % Find some replacement shards to cover the missing range
             % TODO It's possible in rare cases of shard merging to end up
             % with overlapping shard ranges from this technique
             lists:map(fun(#shard{name=Name2, node=N2} = NewShard) ->
-                Ref = rexi:cast(N2, {fabric_rpc, changes, [Name2,ChangesArgs,0]}),
+                Ref = rexi:cast(N2, {fabric_rpc, changes, [Name2,ChangesArgs,0,DbOptions]}),
                 {NewShard#shard{ref = Ref}, 0}
             end, find_replacement_shards(Shard, AllLiveShards))
         end
@@ -267,11 +277,11 @@ make_changes_args(#changes_args{style=Style, filter=undefined}=Args) ->
 make_changes_args(Args) ->
     Args.
 
-get_start_seq(_DbName, #changes_args{dir=fwd, since=Since}) ->
+get_start_seq(_DbName, #changes_args{dir=fwd, since=Since}, _DbOptions) ->
     Since;
-get_start_seq(DbName, #changes_args{dir=rev}) ->
+get_start_seq(DbName, #changes_args{dir=rev}, DbOptions) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, get_update_seq, []),
+    Workers = fabric_util:submit_jobs(Shards, get_update_seq, [DbOptions]),
     {ok, Since} = fabric_util:recv(Workers, #shard.ref,
         fun collect_update_seqs/3, fabric_dict:init(Workers, -1)),
     Since.

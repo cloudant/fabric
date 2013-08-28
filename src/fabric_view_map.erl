@@ -14,19 +14,23 @@
 
 -module(fabric_view_map).
 
--export([go/6]).
+-export([go/6, go/7]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, GroupId, View, Args, Callback, Acc0) when is_binary(GroupId) ->
-    {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, []),
-    go(DbName, DDoc, View, Args, Callback, Acc0);
+%% @equiv go(DbName, GroupId, View, Args, [], Callback, Acc0)
+go(DbName, GroupId, View, Args, Callback, Acc0) ->
+    go(DbName, GroupId, View, Args, [], Callback, Acc0).
 
-go(DbName, DDoc, View, Args, Callback, Acc0) ->
+go(DbName, GroupId, View, Args, DbOptions, Callback, Acc0) when is_binary(GroupId) ->
+    {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, DbOptions),
+    go(DbName, DDoc, View, Args, DbOptions, Callback, Acc0);
+
+go(DbName, DDoc, View, Args, DbOptions, Callback, Acc0) ->
     Shards = fabric_view:get_shards(DbName, Args),
-    Workers = fabric_util:submit_jobs(Shards, map_view, [DDoc, View, Args]),
+    Workers = fabric_util:submit_jobs(Shards, map_view, [DDoc, View, Args, DbOptions]),
     #view_query_args{limit = Limit, skip = Skip, keys = Keys} = Args,
     State = #collector{
         db_name=DbName,

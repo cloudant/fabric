@@ -21,17 +21,19 @@
 
 % DBs
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
-    delete_db/2, get_db_info/1, get_doc_count/1, set_revs_limit/3,
-    set_security/2, set_security/3, get_revs_limit/1, get_security/1,
-    get_security/2, get_all_security/1, get_all_security/2]).
+    delete_db/2, get_db_info/1, get_db_info/2, get_doc_count/1,
+    get_doc_count/2, set_revs_limit/3, set_security/2, set_security/3,
+    get_revs_limit/1, get_revs_limit/2, get_security/1, get_security/2,
+    get_all_security/1, get_all_security/2]).
 
 % Documents
 -export([open_doc/3, open_revs/4, get_missing_revs/2, get_missing_revs/3,
     update_doc/3, update_docs/3, purge_docs/2, att_receiver/2]).
 
 % Views
--export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
-    get_view_group_info/2]).
+-export([all_docs/4, all_docs/5, changes/4, changes/5, query_view/3,
+    query_view/4, query_view/6, query_view/7, get_view_group_info/2,
+    get_view_group_info/3]).
 
 % miscellany
 -export([design_docs/1, reset_validation_funs/1, cleanup_index_files/0,
@@ -69,10 +71,14 @@ all_dbs(Prefix) when is_binary(Prefix) ->
 all_dbs(Prefix) when is_list(Prefix) ->
     all_dbs(list_to_binary(Prefix)).
 
+%% @equiv get_db_info(DbName, [])
+get_db_info(DbName) ->
+    get_db_info(DbName, []).
+
 %% @doc returns a property list of interesting properties
 %%      about the database such as `doc_count', `disk_size',
 %%      etc.
--spec get_db_info(dbname()) ->
+-spec get_db_info(dbname(), [option()]) ->
     {ok, [
         {instance_start_time, binary()} |
         {doc_count, non_neg_integer()} |
@@ -82,13 +88,17 @@ all_dbs(Prefix) when is_list(Prefix) ->
         {disk_size, non_neg_integer()} |
         {disk_format_version, pos_integer()}
     ]}.
-get_db_info(DbName) ->
-    fabric_db_info:go(dbname(DbName)).
+get_db_info(DbName, Options) ->
+    fabric_db_info:go(dbname(DbName), opts(Options)).
+
+%% @equiv get_doc_count(DbName, [])
+get_doc_count(DbName) ->
+    get_doc_count(DbName, []).
 
 %% @doc the number of docs in a database
--spec get_doc_count(dbname()) -> {ok, non_neg_integer()}.
-get_doc_count(DbName) ->
-    fabric_db_doc_count:go(dbname(DbName)).
+-spec get_doc_count(dbname(), [option()]) -> {ok, non_neg_integer()}.
+get_doc_count(DbName, Options) ->
+    fabric_db_doc_count:go(dbname(DbName), opts(Options)).
 
 %% @equiv create_db(DbName, [])
 create_db(DbName) ->
@@ -119,10 +129,14 @@ delete_db(DbName, Options) ->
 set_revs_limit(DbName, Limit, Options) when is_integer(Limit), Limit > 0 ->
     fabric_db_meta:set_revs_limit(dbname(DbName), Limit, opts(Options)).
 
-%% @doc retrieves the maximum number of document revisions
--spec get_revs_limit(dbname()) -> pos_integer() | no_return().
+%% @equiv get_revs_limit(DbName, [{user_ctx, #user_ctx{roles = [<<"_admin">>]}}])
 get_revs_limit(DbName) ->
-    {ok, Db} = fabric_util:get_db(dbname(DbName), [?ADMIN_CTX]),
+    get_revs_limit(DbName, [?ADMIN_CTX]).
+
+%% @doc retrieves the maximum number of document revisions
+-spec get_revs_limit(dbname(), [option()]) -> pos_integer() | no_return().
+get_revs_limit(DbName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
     try couch_db:get_revs_limit(Db) after catch couch_db:close(Db) end.
 
 %% @doc sets the readers/writers/admin permissions for a database
@@ -135,11 +149,12 @@ set_security(DbName, SecObj) ->
 set_security(DbName, SecObj, Options) ->
     fabric_db_meta:set_security(dbname(DbName), SecObj, opts(Options)).
 
+%% @equiv get_security(DbName, [{user_ctx, #user_ctx{roles = [<<"_admin">>]}}])
 get_security(DbName) ->
     get_security(DbName, [?ADMIN_CTX]).
 
 %% @doc retrieve the security object for a database
--spec get_security(dbname()) -> json_obj() | no_return().
+-spec get_security(dbname(), [option()]) -> json_obj() | no_return().
 get_security(DbName, Options) ->
     {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
     try couch_db:get_security(Db) after catch couch_db:close(Db) end.
@@ -234,33 +249,44 @@ purge_docs(_DbName, _IdsRevs) ->
 att_receiver(Req, Length) ->
     fabric_doc_attachments:receiver(Req, Length).
 
+%% @equiv all_docs(DbName, Callback, Acc0, QueryArgs, [])
+all_docs(DbName, Callback, Acc0, QueryArgs) ->
+    all_docs(DbName, Callback, Acc0, QueryArgs, []).
+
 %% @doc retrieves all docs. Additional query parameters, such as `limit',
 %%      `start_key' and `end_key', `descending', and `include_docs', can
 %%      also be passed to further constrain the query. See <a href=
 %%      "http://wiki.apache.org/couchdb/HTTP_Document_API#All_Documents">
 %%      all_docs</a> for details
--spec all_docs(dbname(), callback(), [] | tuple(), #view_query_args{}) ->
+-spec all_docs(dbname(), callback(), [] | tuple(), #view_query_args{},
+               [option()]) ->
     {ok, [any()]}.
-all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs) when
+all_docs(DbName, Callback, Acc0, #view_query_args{} = QueryArgs, Options) when
         is_function(Callback, 2) ->
-    fabric_view_all_docs:go(dbname(DbName), QueryArgs, Callback, Acc0);
+    fabric_view_all_docs:go(dbname(DbName), QueryArgs, opts(Options), Callback, Acc0);
 
 %% @doc convenience function that takes a keylist rather than a record
 %% @equiv all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs))
-all_docs(DbName, Callback, Acc0, QueryArgs) ->
-    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs)).
+all_docs(DbName, Callback, Acc0, QueryArgs, Options) ->
+    all_docs(DbName, Callback, Acc0, kl_to_query_args(QueryArgs), Options).
 
+%% @equiv changes(DbName, Callback, Acc0, Options, [])
+changes(DbName, Callback, Acc0, Options) ->
+    changes(DbName, Callback, Acc0, Options, []).
 
--spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
+-spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}],
+              [option()]) ->
     {ok, any()}.
-changes(DbName, Callback, Acc0, #changes_args{}=Options) ->
-    Feed = Options#changes_args.feed,
-    fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0);
+changes(DbName, Callback, Acc0, #changes_args{}=ChangesOptions, Options) ->
+    Feed = ChangesOptions#changes_args.feed,
+    fabric_view_changes:go(dbname(DbName), Feed, ChangesOptions,
+                           opts(Options), Callback, Acc0);
 
 %% @doc convenience function, takes keylist instead of record
 %% @equiv changes(DbName, Callback, Acc0, kl_to_changes_args(Options))
-changes(DbName, Callback, Acc0, Options) ->
-    changes(DbName, Callback, Acc0, kl_to_changes_args(Options)).
+changes(DbName, Callback, Acc0, ChangesOptions, Options) ->
+    changes(DbName, Callback, Acc0,
+            kl_to_changes_args(ChangesOptions), Options).
 
 %% @equiv query_view(DbName, DesignName, ViewName, #view_query_args{})
 query_view(DbName, DesignName, ViewName) ->
@@ -272,14 +298,19 @@ query_view(DbName, DesignName, ViewName, QueryArgs) ->
     Callback = fun default_callback/2,
     query_view(DbName, DesignName, ViewName, Callback, [], QueryArgs).
 
+%% @equiv query_view(DbName, DesignName,
+%%                   ViewName, fun default_callback/2, [], QueryArgs, [])
+query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
+    query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs, []).
+
 %% @doc execute a given view.
 %%      There are many additional query args that can be passed to a view,
 %%      see <a href="http://wiki.apache.org/couchdb/HTTP_view_API#Querying_Options">
 %%      query args</a> for details.
 -spec query_view(dbname(), #doc{} | binary(), iodata(), callback(), any(),
-        #view_query_args{}) ->
+        #view_query_args{}, [option()]) ->
     any().
-query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
+query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs, Options) ->
     Db = dbname(DbName), View = name(ViewName),
     case is_reduce_view(Db, Design, View, QueryArgs) of
     true ->
@@ -287,11 +318,15 @@ query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
     false ->
         Mod = fabric_view_map
     end,
-    Mod:go(Db, Design, View, QueryArgs, Callback, Acc0).
+    Mod:go(Db, Design, View, QueryArgs, opts(Options), Callback, Acc0).
+
+%% @equiv get_view_group_info(DbName, DesignId, [])
+get_view_group_info(DbName, DesignId) ->
+    get_view_group_info(DbName, DesignId, []).
 
 %% @doc retrieve info about a view group, disk size, language, whether compaction
 %%      is running and so forth
--spec get_view_group_info(dbname(), #doc{} | docid()) ->
+-spec get_view_group_info(dbname(), #doc{} | docid(), [option()]) ->
     {ok, [
         {signature, binary()} |
         {language, binary()} |
@@ -303,12 +338,16 @@ query_view(DbName, Design, ViewName, Callback, Acc0, QueryArgs) ->
         {update_seq, pos_integer()} |
         {purge_seq, non_neg_integer()}
     ]}.
-get_view_group_info(DbName, DesignId) ->
-    fabric_group_info:go(dbname(DbName), design_doc(DesignId)).
+get_view_group_info(DbName, DesignId, Options) ->
+    fabric_group_info:go(dbname(DbName), design_doc(DesignId), opts(Options)).
+
+%% @equiv design_docs(DbName, [])
+design_docs(DbName) ->
+    design_docs(DbName, []).
 
 %% @doc retrieve all the design docs from a database
--spec design_docs(dbname()) -> {ok, [json_obj()]}.
-design_docs(DbName) ->
+-spec design_docs(dbname(), [option()]) -> {ok, [json_obj()]}.
+design_docs(DbName, Options) ->
     Extra = case get(io_priority) of
         undefined -> [];
         Else -> [{io_priority, Else}]
@@ -333,7 +372,7 @@ design_docs(DbName) ->
     ({error, Reason}, _Acc) ->
         {error, Reason}
     end,
-    fabric:all_docs(dbname(DbName), Callback, [], QueryArgs).
+    fabric:all_docs(dbname(DbName), Callback, [], QueryArgs, opts(Options)).
 
 %% @doc forces a reload of validation functions, this is performed after
 %%      design docs are update

@@ -14,15 +14,19 @@
 
 -module(fabric_db_doc_count).
 
--export([go/1]).
+-export([go/1, go/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
+%% @equiv go(DbName, [])
 go(DbName) ->
+    go(DbName, []).
+
+go(DbName, Options) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, get_doc_count, []),
+    Workers = fabric_util:submit_jobs(Shards, get_doc_count, [Options]),
     RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil), 0},
     try
