@@ -35,6 +35,10 @@
     query_view/4, query_view/6, query_view/7, get_view_group_info/2,
     get_view_group_info/3]).
 
+% Snapshots
+-export([get_snapshots/2, get_snapshot/3, add_snapshot/4, delete_snapshot/3,
+    restore_snapshot/3]).
+
 % miscellany
 -export([design_docs/1, reset_validation_funs/1, cleanup_index_files/0,
     cleanup_index_files/1]).
@@ -168,6 +172,40 @@ get_all_security(DbName) ->
 -spec get_all_security(dbname(), [option()]) -> json_obj() | no_return().
 get_all_security(DbName, Options) ->
     fabric_db_meta:get_all_security(dbname(DbName), opts(Options)).
+
+%% @doc retrieve the snapshots for a database
+-spec get_snapshots(dbname(), [option()]) -> json_obj() | no_return().
+get_snapshots(DbName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshots(Db) after catch couch_db:close(Db) end.
+
+%% @doc retrieve specific snapshot for a database
+-spec get_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+get_snapshot(DbName, SName, Options) ->
+    {ok, Db} = fabric_util:get_db(dbname(DbName), opts(Options)),
+    try couch_db:get_snapshot(Db, SName) after catch couch_db:close(Db) end.
+
+%% @doc add a new snapshot of a database
+-spec add_snapshot(dbname(), iodata(), json_obj(), [option()]) ->
+                             json_obj() | no_return().
+add_snapshot(DbName, SName, Body, Options) ->
+    fabric_db_meta:add_snapshot(dbname(DbName), SName,
+                                Body, opts(Options)).
+
+%% @doc delete specific snapshot for a database
+-spec delete_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+delete_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:delete_snapshot(dbname(DbName), SName,
+                                   opts(Options)).
+
+%% @doc restore specific snapshot for a database
+-spec restore_snapshot(dbname(), iodata(), [option()]) ->
+                          json_obj() | no_return().
+restore_snapshot(DbName, SName, Options) ->
+    fabric_db_meta:restore_snapshot(dbname(DbName), SName,
+                                    opts(Options)).
 
 % doc operations
 

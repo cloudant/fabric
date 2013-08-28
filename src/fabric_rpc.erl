@@ -21,6 +21,7 @@
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
 -export([get_all_security/2]).
+-export([add_snapshot/4, delete_snapshot/3, restore_snapshot/3]).
 
 -export([get_db_info/2, get_doc_count/2, get_update_seq/2, all_docs/3,
          changes/4, map_view/5, reduce_view/5, group_info/3]).
@@ -308,6 +309,15 @@ reset_validation_funs(DbName) ->
     _ ->
         ok
     end.
+
+add_snapshot(DbName, SName, Body, Options) ->
+    with_db(DbName, Options, {couch_db, add_snapshot, [SName, Body]}).
+
+delete_snapshot(DbName, SName, Options) ->
+    with_db(DbName, Options, {couch_db, delete_snapshot, [SName]}).
+
+restore_snapshot(DbName, SName, Options) ->
+    with_db(DbName, Options, {couch_db, restore_snapshot, [SName]}).
 
 %%
 %% internal
