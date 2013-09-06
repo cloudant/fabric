@@ -41,7 +41,7 @@
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
 all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
-    {ok, Db} = get_or_create_db(DbName, []),
+    {ok, #db{id_tree = Bt} = Db} = get_or_create_db(DbName, []),
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
@@ -69,7 +69,7 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
         {start_key, if is_binary(StartKey) -> StartKey; true -> StartDocId end},
         {EndKeyType, if is_binary(EndKey) -> EndKey; true -> EndDocId end}
     ],
-    {ok, _, Acc} = couch_db:enum_docs(Db, fun view_fold/3, Acc0, Options),
+    {ok, _, Acc} = couch_btree:fold(Bt, fun all_docs_fold/4, Acc0, Options),
     final_response(Total, Acc#view_acc.offset).
 
 changes(DbName, #changes_args{} = Args, StartSeq) ->
@@ -303,6 +303,14 @@ get_or_create_db(DbName, Options) ->
     Else ->
         Else
     end.
+
+all_docs_fold(traverse, _LK, Red, Acc) when element(1, Red) =:= 0 ->
+    % Skip the entire subtree -- everything underneath is deleted
+    {skip, Acc};
+all_docs_fold(traverse, _LK, _Red, Acc) ->
+    {ok, Acc};
+all_docs_fold(visit, KV, Red, Acc) ->
+    view_fold(KV, Red, Acc).
 
 view_fold(#full_doc_info{} = FullDocInfo, OffsetReds, Acc) ->
     % matches for _all_docs and translates #full_doc_info{} -> KV pair
