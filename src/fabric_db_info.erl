@@ -97,8 +97,10 @@ merge_other_results(Results) ->
         lists:foldl(fun({K,V},D0) -> orddict:append(K,V,D0) end, D, Props)
     end, orddict:new(), Results),
     orddict:fold(fun
+        (billing_size, X, Acc) ->
+            [{billing_size, lists:sum(X)} | Acc];
         (data_size, X, Acc) ->
-            [{data_size, lists:sum(X)} | Acc];
+            [{data_size, fabric_util:sum_or_null(X)} | Acc];
         (_, _, Acc) ->
             Acc
     end, [], Dict).

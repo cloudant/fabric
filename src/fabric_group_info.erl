@@ -81,8 +81,10 @@ merge_results(Info) ->
             [{language, X} | Acc];
         (disk_size, X, Acc) ->
             [{disk_size, lists:sum(X)} | Acc];
+        (billing_size, X, Acc) ->
+            [{billing_size, lists:sum(X)} | Acc];
         (data_size, X, Acc) ->
-            [{data_size, lists:sum(X)} | Acc];
+            [{data_size, fabric_util:sum_or_null(X)} | Acc];
         (compact_running, X, Acc) ->
             [{compact_running, lists:member(true, X)} | Acc];
         (updater_running, X, Acc) ->
