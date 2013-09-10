@@ -50,6 +50,9 @@ handle_message({rexi_EXIT, Reason}, Shard, {Counters, Acc}) ->
         {error, Reason}
     end;
 
+handle_message({not_found, Reason}, _, _) ->
+    throw({not_found, Reason});
+
 handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of
     undefined ->
