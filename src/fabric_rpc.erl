@@ -21,6 +21,10 @@
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
 -export([get_all_security/2]).
+-export([add_snapshot/4, delete_snapshot/3, restore_snapshot/3]).
+
+-export([get_db_info/2, get_doc_count/2, get_update_seq/2, all_docs/3,
+         changes/4, map_view/5, reduce_view/5, group_info/3]).
 
 -include("fabric.hrl").
 -include_lib("couch/include/couch_db.hrl").
@@ -40,8 +44,12 @@
 %% rpc endpoints
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
-all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
-    {ok, #db{id_tree = Bt} = Db} = get_or_create_db(DbName, []),
+%% @equiv all_docs(DbName, QueryArgs, [])
+all_docs(DbName, QueryArgs) ->
+    all_docs(DbName, QueryArgs, []).
+
+all_docs(DbName, #view_query_args{keys=nil} = QueryArgs, DbOptions) ->
+    {ok, #db{id_tree = Bt} = Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
@@ -72,12 +80,16 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
     {ok, _, Acc} = couch_btree:fold(Bt, fun all_docs_fold/4, Acc0, Options),
     final_response(Total, Acc#view_acc.offset).
 
-changes(DbName, #changes_args{} = Args, StartSeq) ->
-    changes(DbName, [Args], StartSeq);
-changes(DbName, Options, StartSeq) ->
+%% @equiv changes(DbName, Args, StartSeq, [])
+changes(DbName, Args, StartSeq) ->
+    changes(DbName, Args, StartSeq, []).
+
+changes(DbName, #changes_args{} = Args, StartSeq, DbOptions) ->
+    changes(DbName, [Args], StartSeq, DbOptions);
+changes(DbName, Options, StartSeq, DbOptions) ->
     erlang:put(io_priority, {interactive, DbName}),
     #changes_args{dir=Dir} = Args = lists:keyfind(changes_args, 1, Options),
-    case get_or_create_db(DbName, []) of
+    case get_or_create_db(DbName, DbOptions) of
     {ok, Db} ->
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
@@ -93,8 +105,12 @@ changes(DbName, Options, StartSeq) ->
         rexi:reply(Error)
     end.
 
+%% @equiv map_view(DbName, DDoc, ViewName, QueryArgs, [])
 map_view(DbName, DDoc, ViewName, QueryArgs) ->
-    {ok, Db} = get_or_create_db(DbName, []),
+    map_view(DbName, DDoc, ViewName, QueryArgs, []).
+
+map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
+    {ok, Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         limit = Limit,
         skip = Skip,
@@ -134,12 +150,16 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
     end,
     final_response(Total, Acc#view_acc.offset).
 
-reduce_view(DbName, #doc{} = DDoc, ViewName, QueryArgs) ->
+%% @equiv reduce_view(DbName, DDoc, ViewName, QueryArgs, [])
+reduce_view(DbName, DDoc, ViewName, QueryArgs) ->
+    reduce_view(DbName, DDoc, ViewName, QueryArgs, []).
+
+reduce_view(DbName, #doc{} = DDoc, ViewName, QueryArgs, DbOptions) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
-    reduce_view(DbName, Group, ViewName, QueryArgs);
-reduce_view(DbName, Group0, ViewName, QueryArgs) ->
+    reduce_view(DbName, Group, ViewName, QueryArgs, DbOptions);
+reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
     erlang:put(io_priority, {interactive, DbName}),
-    {ok, Db} = get_or_create_db(DbName, []),
+    {ok, Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         group_level = GroupLevel,
         limit = Limit,
@@ -206,14 +226,26 @@ delete_db(DbName) ->
 delete_shard_db_doc(_, DocId) ->
     rexi:reply(mem3_util:delete_db_doc(DocId)).
 
+%% @equiv get_db_info(DbName, [])
 get_db_info(DbName) ->
-    with_db(DbName, [], {couch_db, get_db_info, []}).
+    get_db_info(DbName, []).
 
+get_db_info(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_db_info, []}).
+
+%% @equiv get_doc_count(DbName, [])
 get_doc_count(DbName) ->
-    with_db(DbName, [], {couch_db, get_doc_count, []}).
+    get_doc_count(DbName, []).
 
+get_doc_count(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_doc_count, []}).
+
+%% @equiv get_update_seq(DbName, [])
 get_update_seq(DbName) ->
-    with_db(DbName, [], {couch_db, get_update_seq, []}).
+    get_update_seq(DbName, []).
+
+get_update_seq(DbName, Options) ->
+    with_db(DbName, Options, {couch_db, get_update_seq, []}).
 
 set_security(DbName, SecObj, Options) ->
     with_db(DbName, Options, {couch_db, set_security, [SecObj]}).
@@ -262,7 +294,11 @@ update_docs(DbName, Docs0, Options) ->
     Docs = make_att_readers(Docs0),
     with_db(DbName, Options, {couch_db, update_docs, [Docs, Options, X]}).
 
+%% @equiv group_info(DbName, Group0, [])
 group_info(DbName, Group0) ->
+    group_info(DbName, Group0, []).
+
+group_info(DbName, Group0, _DbOptions) ->
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
     rexi:reply(couch_view_group:request_group_info(Pid)).
 
@@ -273,6 +309,15 @@ reset_validation_funs(DbName) ->
     _ ->
         ok
     end.
+
+add_snapshot(DbName, SName, Body, Options) ->
+    with_db(DbName, Options, {couch_db, add_snapshot, [SName, Body]}).
+
+delete_snapshot(DbName, SName, Options) ->
+    with_db(DbName, Options, {couch_db, delete_snapshot, [SName]}).
+
+restore_snapshot(DbName, SName, Options) ->
+    with_db(DbName, Options, {couch_db, restore_snapshot, [SName]}).
 
 %%
 %% internal

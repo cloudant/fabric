@@ -14,20 +14,24 @@
 
 -module(fabric_group_info).
 
--export([go/2]).
+-export([go/2, go/3]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, GroupId) when is_binary(GroupId) ->
-    {ok, DDoc} = fabric:open_doc(DbName, GroupId, []),
+%% @equiv go(DbName, IdOrDDoc, [])
+go(DbName, IdOrDDoc) ->
+    go(DbName, IdOrDDoc, []).
+
+go(DbName, GroupId, DbOptions) when is_binary(GroupId) ->
+    {ok, DDoc} = fabric:open_doc(DbName, GroupId, DbOptions),
     go(DbName, DDoc);
 
-go(DbName, #doc{} = DDoc) ->
+go(DbName, #doc{} = DDoc, DbOptions) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, group_info, [Group]),
+    Workers = fabric_util:submit_jobs(Shards, group_info, [Group, DbOptions]),
     RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil), []},
     try

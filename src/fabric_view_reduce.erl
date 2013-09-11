@@ -14,24 +14,28 @@
 
 -module(fabric_view_reduce).
 
--export([go/6]).
+-export([go/6, go/7]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, GroupId, View, Args, Callback, Acc0) when is_binary(GroupId) ->
-    {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, []),
-    go(DbName, DDoc, View, Args, Callback, Acc0);
+%% @equiv go(DbName, GroupId, View, Args, [], Callback, Acc0)
+go(DbName, GroupId, View, Args, Callback, Acc0) ->
+    go(DbName, GroupId, View, Args, [], Callback, Acc0).
 
-go(DbName, DDoc, VName, Args, Callback, Acc0) ->
+go(DbName, GroupId, View, DbOptions, Args, Callback, Acc0) when is_binary(GroupId) ->
+    {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, DbOptions),
+    go(DbName, DDoc, View, Args, DbOptions, Callback, Acc0);
+
+go(DbName, DDoc, VName, Args, DbOptions, Callback, Acc0) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     Lang = couch_view_group:get_language(Group),
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
     Workers = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
-        Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,Args]}),
+        Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,Args,DbOptions]}),
         Shard#shard{ref = Ref}
     end, fabric_view:get_shards(DbName, Args)),
     RexiMon = fabric_util:create_monitors(Workers),

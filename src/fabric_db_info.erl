@@ -14,14 +14,17 @@
 
 -module(fabric_db_info).
 
--export([go/1]).
+-export([go/1, go/2]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 
 go(DbName) ->
+    go(DbName, []).
+
+go(DbName, Options) ->
     Shards = mem3:shards(DbName),
-    Workers = fabric_util:submit_jobs(Shards, get_db_info, []),
+    Workers = fabric_util:submit_jobs(Shards, get_db_info, [Options]),
     RexiMon = fabric_util:create_monitors(Shards),
     Acc0 = {fabric_dict:init(Workers, nil), []},
     try
@@ -46,6 +49,9 @@ handle_message({rexi_EXIT, Reason}, Shard, {Counters, Acc}) ->
     false ->
         {error, Reason}
     end;
+
+handle_message({not_found, Reason}, _, _) ->
+    throw({not_found, Reason});
 
 handle_message({ok, Info}, #shard{dbname=Name} = Shard, {Counters, Acc}) ->
     case fabric_dict:lookup_element(Shard, Counters) of
@@ -88,6 +94,8 @@ merge_results(Info) ->
             [{other, {merge_other_results(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
+        (snapshots, X, Acc) ->
+            [{snapshots, lists:max(X)} | Acc];
         (_, _, Acc) ->
             Acc
     end, [{instance_start_time, <<"0">>}], Dict).

@@ -14,15 +14,19 @@
 
 -module(fabric_view_all_docs).
 
--export([go/4]).
--export([open_doc/3]). % exported for spawn
+-export([go/4, go/5]).
+-export([open_doc/3, open_doc/4]). % exported for spawn
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
-go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
-    Workers = fabric_util:submit_jobs(mem3:shards(DbName),all_docs,[QueryArgs]),
+%% @equiv go(DbName, QueryArgs, [], Callback, Acc0)
+go(DbName, QueryArgs, Callback, Acc0) ->
+    go(DbName, QueryArgs, [], Callback, Acc0).
+
+go(DbName, #view_query_args{keys=nil} = QueryArgs, DbOptions, Callback, Acc0) ->
+    Workers = fabric_util:submit_jobs(mem3:shards(DbName),all_docs,[QueryArgs, DbOptions]),
     #view_query_args{limit = Limit, skip = Skip} = QueryArgs,
     State = #collector{
         query_args = QueryArgs,
@@ -46,8 +50,7 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc0) ->
         fabric_util:cleanup(Workers)
     end;
 
-
-go(DbName, QueryArgs, Callback, Acc0) ->
+go(DbName, QueryArgs, DbOptions, Callback, Acc0) ->
     #view_query_args{
         direction = Dir,
         include_docs = IncludeDocs,
@@ -55,9 +58,9 @@ go(DbName, QueryArgs, Callback, Acc0) ->
         skip = Skip,
         keys = Keys0
     } = QueryArgs,
-    {_, Ref0} = spawn_monitor(fun() -> exit(fabric:get_doc_count(DbName)) end),
+    {_, Ref0} = spawn_monitor(fun() -> exit(fabric:get_doc_count(DbName, DbOptions)) end),
     SpawnFun = fun(Key) ->
-        spawn_monitor(?MODULE, open_doc, [DbName, Key, IncludeDocs])
+        spawn_monitor(?MODULE, open_doc, [DbName, Key, IncludeDocs, DbOptions])
     end,
     MaxJobs = all_docs_concurrency(),
     Keys1 = case Dir of
@@ -185,7 +188,10 @@ doc_receive_loop(Keys, Pids, SpawnFun, MaxJobs, Callback, AccIn) ->
     end.
 
 open_doc(DbName, Id, IncludeDocs) ->
-    Row = case fabric:open_doc(DbName, Id, [deleted]) of
+    open_doc(DbName, Id, IncludeDocs, []).
+
+open_doc(DbName, Id, IncludeDocs, DbOptions) ->
+    Row = case fabric:open_doc(DbName, Id, [deleted|DbOptions]) of
     {not_found, missing} ->
         Doc = undefined,
         #view_row{key=Id};

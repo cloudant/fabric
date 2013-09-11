@@ -89,7 +89,10 @@ handle_message({missing_stub, Stub}, _, _) ->
 handle_message({not_found, no_db_file} = X, Worker, Acc0) ->
     {_, _, _, GroupedDocs, _} = Acc0,
     Docs = couch_util:get_value(Worker, GroupedDocs),
-    handle_message({ok, [X || _D <- Docs]}, Worker, Acc0).
+    handle_message({ok, [X || _D <- Docs]}, Worker, Acc0);
+handle_message({not_found, Reason}, _, _) ->
+    throw({not_found, Reason}).
+
 
 force_reply(Doc, [], {_, W, Acc}) ->
     {error, W, [{Doc, {error, internal_server_error}} | Acc]};

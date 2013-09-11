@@ -42,6 +42,8 @@ handle_message({rexi_DOWN, _, {_,NodeRef},_}, _Shard, {_WorkerLen, ResultDict, W
     skip_message({fabric_dict:size(NewWorkers), ResultDict, NewWorkers});
 handle_message({rexi_EXIT, _}, Worker, {W, D, Workers}) ->
     skip_message({W-1,D,lists:delete(Worker, Workers)});
+handle_message({not_found, Reason}, _, _) ->
+    throw({not_found, Reason});
 handle_message({ok, Results}, _Worker, {1, D0, _}) ->
     D = update_dict(D0, Results),
     {stop, dict:fold(fun force_reply/3, [], D)};
