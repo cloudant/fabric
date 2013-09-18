@@ -25,24 +25,29 @@ go(_, [], _) ->
 go(DbName, AllDocs, Opts) ->
     validate_atomic_update(DbName, AllDocs, lists:member(all_or_nothing, Opts)),
     Options = lists:delete(all_or_nothing, Opts),
-    GroupedDocs = lists:map(fun({#shard{name=Name, node=Node} = Shard, Docs}) ->
-        Ref = rexi:cast(Node, {fabric_rpc, update_docs, [Name, Docs, Options]}),
-        {Shard#shard{ref=Ref}, Docs}
-    end, group_docs_by_shard(DbName, AllDocs)),
+    DocRefs = [{Doc, make_ref()} || Doc <- AllDocs],
+    GroupedDocs = lists:map(
+        fun({#shard{name=Name, node=Node} = Shard, ShardDocRefs}) ->
+            Ref = rexi:cast(Node, {fabric_rpc, update_docs,
+                [Name, extract_docs(ShardDocRefs), Options]}),
+            {Shard#shard{ref=Ref}, ShardDocRefs}
+        end, group_docs_by_shard(DbName, DocRefs)),
     {Workers, _} = lists:unzip(GroupedDocs),
     RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, integer_to_list(mem3:quorum(DbName))),
     Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
-        dict:from_list([{Doc,[]} || Doc <- AllDocs])},
+        dict:new()},
     Timeout = fabric_util:request_timeout(),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, Acc0, infinity, Timeout) of
     {ok, {Health, Results}} when Health =:= ok; Health =:= accepted ->
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Results), R =/= noreply]};
+        Reordered = couch_util:reorder_results(DocRefs, Results),
+        {Health, [R || R <- Reordered, R =/= noreply]};
     {timeout, Acc} ->
         {_, _, W1, _, DocReplDict} = Acc,
         {Health, _, Resp} = dict:fold(fun force_reply/3, {ok, W1, []},
             DocReplDict),
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Resp), R =/= noreply]};
+        Reordered = couch_util:reorder_results(DocRefs, Resp),
+        {Health, [R || R <- Reordered, R =/= noreply]};
     Else ->
         Else
     after
@@ -67,13 +72,13 @@ handle_message(attachment_chunk_received, _Worker, Acc0) ->
     {ok, Acc0};
 handle_message({ok, Replies}, Worker, Acc0) ->
     {WaitingCount, DocCount, W, GroupedDocs, DocReplyDict0} = Acc0,
-    {value, {_, Docs}, NewGrpDocs} = lists:keytake(Worker, 1, GroupedDocs),
-    DocReplyDict = append_update_replies(Docs, Replies, DocReplyDict0),
+    {value, {_, DocRefs}, NewGrpDocs} = lists:keytake(Worker, 1, GroupedDocs),
+    DocReplyDict = append_update_replies(DocRefs, Replies, DocReplyDict0),
     case {WaitingCount, dict:size(DocReplyDict)} of
     {1, _} ->
         % last message has arrived, we need to conclude things
         {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []},
-           DocReplyDict),
+            DocReplyDict),
         {stop, {Health, Reply}};
     {_, DocCount} ->
         % we've got at least one reply for each document, let's take a look
@@ -82,7 +87,9 @@ handle_message({ok, Replies}, Worker, Acc0) ->
             {ok, {WaitingCount - 1, DocCount, W, NewGrpDocs, DocReplyDict}};
         {stop, W, FinalReplies} ->
             {stop, {ok, FinalReplies}}
-        end
+        end;
+    _ ->
+        {ok, {WaitingCount - 1, DocCount, W, NewGrpDocs, DocReplyDict}}
     end;
 handle_message({missing_stub, Stub}, _, _) ->
     throw({missing_stub, Stub});
@@ -91,36 +98,37 @@ handle_message({not_found, no_db_file} = X, Worker, Acc0) ->
     Docs = couch_util:get_value(Worker, GroupedDocs),
     handle_message({ok, [X || _D <- Docs]}, Worker, Acc0).
 
-force_reply(Doc, [], {_, W, Acc}) ->
-    {error, W, [{Doc, {error, internal_server_error}} | Acc]};
-force_reply(Doc, [FirstReply|_] = Replies, {Health, W, Acc}) ->
+force_reply(DocRef, [], {_, W, Acc}) ->
+    {error, W, [{DocRef, {error, internal_server_error}} | Acc]};
+force_reply(DocRef, [FirstReply|_] = Replies, {Health, W, Acc}) ->
     case update_quorum_met(W, Replies) of
     {true, Reply} ->
-        {Health, W, [{Doc,Reply} | Acc]};
+        {Health, W, [{DocRef,Reply} | Acc]};
     false ->
+        {Doc, _Ref} = DocRef,
         twig:log(warn, "write quorum (~p) failed for ~s", [W, Doc#doc.id]),
         case [Reply || {ok, Reply} <- Replies] of
         [] ->
             % check if all errors are identical, if so inherit health
             case lists:all(fun(E) -> E =:= FirstReply end, Replies) of
             true ->
-                {Health, W, [{Doc, FirstReply} | Acc]};
+                {Health, W, [{DocRef, FirstReply} | Acc]};
             false ->
-                {error, W, [{Doc, FirstReply} | Acc]}
+                {error, W, [{DocRef, FirstReply} | Acc]}
             end;
         [AcceptedRev | _] ->
             NewHealth = case Health of ok -> accepted; _ -> Health end,
-            {NewHealth, W, [{Doc, {accepted,AcceptedRev}} | Acc]}
+            {NewHealth, W, [{DocRef, {accepted,AcceptedRev}} | Acc]}
         end
     end.
 
 maybe_reply(_, _, continue) ->
     % we didn't meet quorum for all docs, so we're fast-forwarding the fold
     continue;
-maybe_reply(Doc, Replies, {stop, W, Acc}) ->
+maybe_reply(DocRef, Replies, {stop, W, Acc}) ->
     case update_quorum_met(W, Replies) of
     {true, Reply} ->
-        {stop, W, [{Doc, Reply} | Acc]};
+        {stop, W, [{DocRef, Reply} | Acc]};
     false ->
         continue
     end.
@@ -144,21 +152,24 @@ good_reply(_) ->
     false.
 
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
-group_docs_by_shard(DbName, Docs) ->
-    dict:to_list(lists:foldl(fun(#doc{id=Id} = Doc, D0) ->
+group_docs_by_shard(DbName, DocRefs) ->
+    dict:to_list(lists:foldl(fun({#doc{id=Id}, _Ref} = DocRef, D0) ->
         lists:foldl(fun(Shard, D1) ->
-            dict:append(Shard, Doc, D1)
-        end, D0, mem3:shards(DbName,Id))
-    end, dict:new(), Docs)).
+            dict:append(Shard, DocRef, D1)
+        end, D0, mem3:shards(DbName, Id))
+    end, dict:new(), DocRefs)).
+
+-spec extract_docs([{#doc{}, reference()}]) -> [#doc{}].
+extract_docs(DocRefs) ->
+    lists:map(fun({Doc, _Ref}) -> Doc end, DocRefs).
 
 append_update_replies([], [], DocReplyDict) ->
     DocReplyDict;
-append_update_replies([Doc|Rest], [], Dict0) ->
+append_update_replies([DocRef|Rest], [], Dict0) ->
     % icky, if replicated_changes only errors show up in result
-    append_update_replies(Rest, [], dict:append(Doc, noreply, Dict0));
-append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
-    % TODO what if the same document shows up twice in one update_docs call?
-    append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
+    append_update_replies(Rest, [], dict:append(DocRef, noreply, Dict0));
+append_update_replies([DocRef|Rest1], [Reply|Rest2], Dict0) ->
+    append_update_replies(Rest1, Rest2, dict:append(DocRef, Reply, Dict0)).
 
 skip_message({0, _, W, _, DocReplyDict}) ->
     {Health, W, Reply} = dict:fold(fun force_reply/3, {ok, W, []}, DocReplyDict),
