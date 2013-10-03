@@ -17,7 +17,7 @@
 -export([submit_jobs/3, submit_jobs/4, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
         update_counter/3, remove_ancestors/2, create_monitors/1, kv/2,
         remove_down_workers/2]).
--export([request_timeout/0]).
+-export([request_timeout/0, sum_or_null/1]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
@@ -53,6 +53,12 @@ request_timeout() ->
     case config:get("fabric", "request_timeout", "60000") of
         "infinity" -> infinity;
         N -> list_to_integer(N)
+    end.
+
+sum_or_null(List) ->
+    case lists:member(null, List) of
+        true -> null;
+        false -> lists:max(List)
     end.
 
 get_db(DbName) ->
