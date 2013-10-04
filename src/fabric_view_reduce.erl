@@ -24,17 +24,35 @@ go(DbName, GroupId, View, Args, Callback, Acc0) when is_binary(GroupId) ->
     {ok, DDoc} = fabric:open_doc(DbName, <<"_design/", GroupId/binary>>, []),
     go(DbName, DDoc, View, Args, Callback, Acc0);
 
-go(DbName, DDoc, VName, Args, Callback, Acc0) ->
+go(DbName, DDoc, VName, Args, Callback, Acc) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     Lang = couch_view_group:get_language(Group),
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
-    Workers = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
-        Ref = rexi:cast(N, {fabric_rpc, reduce_view, [Name,DDoc,VName,Args]}),
+    Workers0 = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
+        Ref = rexi:cast(N, {fabric_rpc2, reduce_view, [Name,DDoc,VName,Args]}),
         Shard#shard{ref = Ref}
     end, fabric_view:get_shards(DbName, Args)),
-    RexiMon = fabric_util:create_monitors(Workers),
+    RexiMon = fabric_util:create_monitors(Workers0),
+    try
+        case fabric_util:stream_start(Workers0, #shard.ref) of
+            {ok, Workers} ->
+                try
+                    go(DbName, Workers, Lang, RedSrc, Args, Callback, Acc)
+                after
+                    fabric_util:cleanup(Workers)
+                end;
+            {timeout, _} ->
+                Callback({error, timeout}, Acc);
+            {error, Error} ->
+                Callback({error, Error}, Acc)
+        end
+    after
+        rexi_monitor:stop(RexiMon)
+    end.
+
+go(DbName, Workers, Lang, RedSrc, Args, Callback, Acc0) ->
     #view_query_args{limit = Limit, skip = Skip} = Args,
     OsProc = case os_proc_needed(RedSrc) of
         true -> couch_query_servers:get_os_process(Lang);
@@ -63,68 +81,29 @@ go(DbName, DDoc, VName, Args, Callback, Acc0) ->
     {error, Resp} ->
         {ok, Resp}
     after
-        rexi_monitor:stop(RexiMon),
-        fabric_util:cleanup(Workers),
-        case State#collector.os_proc of
-            nil -> ok;
-            OsProc -> catch couch_query_servers:ret_os_process(OsProc)
+        if OsProc == nil -> ok; true ->
+            catch couch_query_servers:ret_os_process(OsProc)
         end
     end.
 
 handle_message({rexi_DOWN, _, {_, NodeRef}, _}, _, State) ->
-    fabric_view:remove_down_shards(State, NodeRef);
+    fabric_view:check_down_shards(State, NodeRef);
 
 handle_message({rexi_EXIT, Reason}, Worker, State) ->
-    #collector{callback=Callback, counters=Counters0, user_acc=Acc} = State,
-    Counters = fabric_dict:erase(Worker, Counters0),
-    case fabric_view:is_progress_possible(Counters) of
-    true ->
-        {ok, State#collector{counters = Counters}};
-    false ->
-        {ok, Resp} = Callback({error, fabric_util:error_info(Reason)}, Acc),
-        {error, Resp}
-    end;
+    fabric_view:handle_worker_exit(State, Worker, Reason);
 
 handle_message(#view_row{key=Key} = Row, {Worker, From}, State) ->
     #collector{counters = Counters0, rows = Rows0} = State,
-    case fabric_dict:lookup_element(Worker, Counters0) of
-    undefined ->
-        % this worker lost the race with other partition copies, terminate it
-        gen_server:reply(From, stop),
-        {ok, State};
-    _ ->
-        Rows = dict:append(Key, Row#view_row{worker={Worker, From}}, Rows0),
-        C1 = fabric_dict:update_counter(Worker, 1, Counters0),
-        % TODO time this call, if slow don't do it every time
-        C2 = fabric_view:remove_overlapping_shards(Worker, C1),
-        State1 = State#collector{rows=Rows, counters=C2},
-        fabric_view:maybe_send_row(State1)
-    end;
+    true = fabric_dict:is_key(Worker, Counters0),
+    Rows = dict:append(Key, Row#view_row{worker={Worker, From}}, Rows0),
+    C1 = fabric_dict:update_counter(Worker, 1, Counters0),
+    State1 = State#collector{rows=Rows, counters=C1},
+    fabric_view:maybe_send_row(State1);
 
 handle_message(complete, Worker, #collector{counters = Counters0} = State) ->
-    case fabric_dict:lookup_element(Worker, Counters0) of
-    undefined ->
-        {ok, State};
-    _ ->
-        C1 = fabric_dict:update_counter(Worker, 1, Counters0),
-        C2 = fabric_view:remove_overlapping_shards(Worker, C1),
-        fabric_view:maybe_send_row(State#collector{counters = C2})
-    end.
-
-complete_worker_test() ->
-    meck:new(config),
-    meck:expect(config, get, fun("rexi","server_per_node",_) -> rexi_server end),
-    Shards =
-        mem3_util:create_partition_map("foo",3,3,[node(),node(),node()]),
-    Workers = lists:map(fun(#shard{} = Shard) ->
-                            Ref = make_ref(),
-                            Shard#shard{ref = Ref}
-                        end,
-                        Shards),
-    State = #collector{counters=fabric_dict:init(Workers,0)},
-    {ok, NewState} = handle_message(complete, lists:nth(2,Workers), State),
-    meck:unload(config),
-    ?assertEqual(orddict:size(NewState#collector.counters),length(Workers) - 2).
+    true = fabric_dict:is_key(Worker, Counters0),
+    C1 = fabric_dict:update_counter(Worker, 1, Counters0),
+    fabric_view:maybe_send_row(State#collector{counters = C1}).
 
 os_proc_needed(<<"_", _/binary>>) -> false;
 os_proc_needed(_) -> true.

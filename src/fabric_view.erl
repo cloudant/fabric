@@ -16,24 +16,34 @@
 
 -export([is_progress_possible/1, remove_overlapping_shards/2, maybe_send_row/1,
     transform_row/1, keydict/1, extract_view/4, get_shards/2,
-    remove_down_shards/2]).
+    check_down_shards/2, handle_worker_exit/3]).
 
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
--spec remove_down_shards(#collector{}, node()) ->
+%% @doc Check if a downed node affects any of our workers
+-spec check_down_shards(#collector{}, node()) ->
     {ok, #collector{}} | {error, any()}.
-remove_down_shards(Collector, BadNode) ->
+check_down_shards(Collector, BadNode) ->
     #collector{callback=Callback, counters=Counters, user_acc=Acc} = Collector,
-    case fabric_util:remove_down_workers(Counters, BadNode) of
-    {ok, NewCounters} ->
-        {ok, Collector#collector{counters = NewCounters}};
-    error ->
-        Reason = {nodedown, <<"progress not possible">>},
-        Callback({error, Reason}, Acc),
-        {error, Reason}
+    Filter = fun(#shard{node = Node}, _) -> Node == BadNode end,
+    BadCounters = fabric_dict:filter(Filter, Counters),
+    case fabric_dict:size(BadCounters) > 0 of
+        true ->
+            Reason = {nodedown, <<"progress not possible">>},
+            Callback({error, Reason}, Acc),
+            {error, Reason};
+        false ->
+            {ok, Collector}
     end.
+
+%% @doc Handle a worker that dies during a stream
+-spec handle_worker_exit(#collector{}, #shard{}, any()) -> {error, any()}.
+handle_worker_exit(Collector, _Worker, Reason) ->
+    #collector{callback=Callback, user_acc=Acc} = Collector,
+    {ok, Resp} = Callback({error, fabric_util:error_info(Reason)}, Acc),
+    {error, Resp}.
 
 %% @doc looks for a fully covered keyrange in the list of counters
 -spec is_progress_possible([{#shard{}, term()}]) -> boolean().
