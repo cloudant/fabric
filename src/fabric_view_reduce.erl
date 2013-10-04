@@ -30,13 +30,16 @@ go(DbName, DDoc, VName, Args, Callback, Acc) ->
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
-    Workers0 = lists:map(fun(#shard{name=Name, node=N} = Shard) ->
-        Ref = rexi:cast(N, {fabric_rpc2, reduce_view, [Name,DDoc,VName,Args]}),
-        Shard#shard{ref = Ref}
-    end, fabric_view:get_shards(DbName, Args)),
+    RPCArgs = [DDoc, VName, Args],
+    Shards = fabric_view:get_shards(DbName, Args),
+    Repls = fabric_view:get_shard_replacements(DbName, Shards),
+    StartFun = fun(Shard) ->
+        hd(fabric_util:submit_jobs([Shard], fabric_rpc2, reduce_view, RPCArgs))
+    end,
+    Workers0 = fabric_util:submit_jobs(Shards,fabric_rpc2,reduce_view,RPCArgs),
     RexiMon = fabric_util:create_monitors(Workers0),
     try
-        case fabric_util:stream_start(Workers0, #shard.ref) of
+        case fabric_util:stream_start(Workers0, #shard.ref, StartFun, Repls) of
             {ok, Workers} ->
                 try
                     go(DbName, Workers, Lang, RedSrc, Args, Callback, Acc)
