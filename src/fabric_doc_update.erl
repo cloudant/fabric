@@ -112,17 +112,22 @@ force_reply(Doc, [FirstReply|_] = Replies, {Health, W, Acc}) ->
     {true, Reply} ->
         {Health, W, [{Doc,Reply} | Acc]};
     false ->
-        couch_log:warning("write quorum (~p) failed for ~s", [W, Doc#doc.id]),
         case [Reply || {ok, Reply} <- Replies] of
         [] ->
             % check if all errors are identical, if so inherit health
             case lists:all(fun(E) -> E =:= FirstReply end, Replies) of
             true ->
+                CounterKey = [fabric, doc_update, errors],
+                margaret_counter:increment(CounterKey),
                 {Health, W, [{Doc, FirstReply} | Acc]};
             false ->
+                CounterKey = [fabric, doc_update, mismatched_errors],
+                margaret_counter:increment(CounterKey),
                 {error, W, [{Doc, FirstReply} | Acc]}
             end;
         [AcceptedRev | _] ->
+            CounterKey = [fabric, doc_update, write_quorum_errors],
+            margaret_counter:increment(CounterKey),
             NewHealth = case Health of ok -> accepted; _ -> Health end,
             {NewHealth, W, [{Doc, {accepted,AcceptedRev}} | Acc]}
         end
