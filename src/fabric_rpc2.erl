@@ -48,6 +48,7 @@ all_docs(DbName, QueryArgs) ->
     all_docs(DbName, QueryArgs, []).
 
 all_docs(DbName, #view_query_args{keys=nil} = QueryArgs, DbOptions) ->
+    set_io_priority(DbName, DbOptions),
     {ok, #db{id_tree = Bt} = Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         start_key = StartKey,
@@ -61,7 +62,6 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs, DbOptions) ->
         inclusive_end = Inclusive,
         extra = Extra
     } = QueryArgs,
-    set_io_priority(DbName, Extra),
     {ok, Total} = couch_db:get_doc_count(Db),
     Acc0 = #view_acc{
         db = Db,
@@ -86,7 +86,7 @@ changes(DbName, Args, StartVector) ->
 changes(DbName, #changes_args{} = Args, StartVector, DbOptions) ->
     changes(DbName, [Args], StartVector, DbOptions);
 changes(DbName, Options, StartVector, DbOptions) ->
-    erlang:put(io_priority, {interactive, DbName}),
+    set_io_priority(DbName, DbOptions),
     #changes_args{dir=Dir} = Args = lists:keyfind(changes_args, 1, Options),
     case get_or_create_db(DbName, DbOptions) of
     {ok, Db} ->
@@ -113,6 +113,7 @@ map_view(DbName, DDoc, ViewName, QueryArgs) ->
     map_view(DbName, DDoc, ViewName, QueryArgs, []).
 
 map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
+    set_io_priority(DbName, DbOptions),
     {ok, Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         limit = Limit,
@@ -123,7 +124,6 @@ map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
         view_type = ViewType,
         extra = Extra
     } = QueryArgs,
-    set_io_priority(DbName, Extra),
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     Group0 = couch_view_group:design_doc_to_view_group(DDoc),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
@@ -161,17 +161,15 @@ reduce_view(DbName, #doc{} = DDoc, ViewName, QueryArgs, DbOptions) ->
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     reduce_view(DbName, Group, ViewName, QueryArgs, DbOptions);
 reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
-    erlang:put(io_priority, {interactive, DbName}),
+    set_io_priority(DbName, DbOptions),
     {ok, Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
         group_level = GroupLevel,
         limit = Limit,
         skip = Skip,
         keys = Keys,
-        stale = Stale,
-        extra = Extra
+        stale = Stale
     } = QueryArgs,
-    set_io_priority(DbName, Extra),
     _GroupFun = group_rows_fun(GroupLevel),
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
