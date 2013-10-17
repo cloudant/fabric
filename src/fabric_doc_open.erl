@@ -122,7 +122,13 @@ read_repair(#acc{dbname=DbName, replies=Replies}) ->
         Ctx = #user_ctx{roles=[<<"_admin">>]},
         Opts = [replicated_changes, {user_ctx, Ctx}],
         Res = fabric:update_docs(DbName, Docs, Opts),
-        twig:log(notice, "read_repair ~s ~s ~p", [DbName, Id, Res]),
+        case Res of
+            {ok, []} ->
+                margaret_counter:increment([fabric, read_repairs, success]);
+            _ ->
+                margaret_counter:increment([fabric, read_repairs, failure]),
+                twig:log(notice, "read_repair ~s ~s ~p", [DbName, Id, Res])
+        end,
         choose_reply(Docs);
     [] ->
         % Try hard to return some sort of information
