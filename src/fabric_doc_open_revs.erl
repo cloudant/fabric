@@ -169,7 +169,13 @@ maybe_execute_read_repair(Db, Docs) ->
     [#doc{id=Id} | _] = Docs,
     Ctx = #user_ctx{roles=[<<"_admin">>]},
     Res = fabric:update_docs(Db, Docs, [replicated_changes, {user_ctx,Ctx}]),
-    twig:log(notice, "read_repair ~s ~s ~p", [Db, Id, Res]).
+    case Res of
+        {ok, []} ->
+            margaret_counter:increment([fabric, read_repairs, success]);
+        _ ->
+            margaret_counter:increment([fabric, read_repairs, failure]),
+            twig:log(notice, "read_repair ~s ~s ~p", [Db, Id, Res])
+    end.
 
 % hackery required so that not_found sorts first
 strip_not_found_missing([]) ->
