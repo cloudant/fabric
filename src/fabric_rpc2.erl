@@ -40,6 +40,14 @@
     group_level = 0
 }).
 
+-record (cacc, {
+    db,
+    seq,
+    args,
+    options,
+    pending
+}).
+
 %% rpc endpoints
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
@@ -93,11 +101,20 @@ changes(DbName, Options, StartVector, DbOptions) ->
         StartSeq = calculate_start_seq(Db, node(), StartVector),
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args, Options},
         try
-            {ok, {_, LastSeq, _, _}} =
+            Acc0 = #cacc{
+                db = Db,
+                seq = StartSeq,
+                args = Args,
+                options = Options,
+                pending = couch_db:count_changes_since(Db, StartSeq)
+            },
+            {ok, #cacc{seq=LastSeq, pending=Pending}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
-            rexi:stream_last({complete, [{seq, {LastSeq, uuid(Db)}}]})
+            rexi:stream_last({complete, [
+                {seq, {LastSeq, uuid(Db)}},
+                {pending, Pending}
+            ]})
         after
             couch_db:close(Db)
         end;
@@ -438,22 +455,24 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
     rexi:stream2(#view_row{key=Key, value=Value}),
     {ok, Acc#view_acc{limit=Limit-1}}.
 
-changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
-        {Db, _OldSeq, Args, Options}) ->
-    {ok, {Db, Seq, Args, Options}};
-changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
-    #changes_args{
-        include_docs = IncludeDocs,
-        filter = Acc
-    } = Args,
+changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq}, Acc) ->
+    {ok, Acc#cacc{seq = Seq, pending = Acc#cacc.pending-1}};
+changes_enumerator(DocInfo, Acc) ->
+    #cacc{
+        db = Db,
+        args = #changes_args{include_docs = IncludeDocs, filter = Filter},
+        options = Options,
+        pending = Pending
+    } = Acc,
     Conflicts = proplists:get_value(conflicts, Options, false),
     #doc_info{id=Id, high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
-    case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
+    case [X || X <- couch_changes:filter(DocInfo, Filter), X /= null] of
     [] ->
         ChangesRow = {no_pass, Seq};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = {change, [
+            {pending, Pending-1},
             {seq, {Seq, uuid(Db)}},
             {id, Id},
             {changes, Results},
@@ -462,7 +481,7 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
         ]}
     end,
     rexi:stream2(ChangesRow),
-    {ok, {Db, Seq, Args, Options}}.
+    {ok, Acc#cacc{seq = Seq, pending = Pending-1}}.
 
 doc_member(Shard, DocInfo, Opts) ->
     case couch_db:open_doc(Shard, DocInfo, [deleted | Opts]) of
