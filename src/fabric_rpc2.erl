@@ -97,7 +97,7 @@ changes(DbName, Options, StartVector, DbOptions) ->
         try
             {ok, {_, LastSeq, _, _}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
-            rexi:stream_last({complete, {LastSeq, uuid(Db)}})
+            rexi:stream_last({complete, [{seq, {LastSeq, uuid(Db)}}]})
         after
             couch_db:close(Db)
         end;
@@ -459,12 +459,26 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     {ok, {Db, Seq, Args, Options}}.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
-    Doc = doc_member(Db, DI, Opts),
-    #change{key={Seq, uuid(Db)}, id=Id, value=Results, doc=Doc, deleted=Del};
+    {change, [
+        {seq, {Seq, uuid(Db)}},
+        {id, Id},
+        {changes, Results},
+        {deleted, Del},
+        {doc, doc_member(Db, DI, Opts)}
+    ]};
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}, Results, true, _, _) ->
-    #change{key={Seq, uuid(Db)}, id=Id, value=Results, deleted=true};
+    {change, [
+        {seq, {Seq, uuid(Db)}},
+        {id, Id},
+        {changes, Results},
+        {deleted, true}
+    ]};
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}, Results, _, _, _) ->
-    #change{key={Seq, uuid(Db)}, id=Id, value=Results}.
+    {change, [
+        {seq, {Seq, uuid(Db)}},
+        {id, Id},
+        {changes, Results}
+    ]}.
 
 doc_member(Shard, DocInfo, Opts) ->
     case couch_db:open_doc(Shard, DocInfo, [deleted | Opts]) of
