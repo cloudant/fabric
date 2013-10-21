@@ -109,10 +109,11 @@ changes(DbName, Options, StartVector, DbOptions) ->
     end.
 
 %% @equiv map_view(DbName, DDoc, ViewName, QueryArgs, [])
-map_view(DbName, DDoc, ViewName, QueryArgs) ->
-    map_view(DbName, DDoc, ViewName, QueryArgs, []).
+map_view(DbName, DDocInfo, ViewName, QueryArgs) ->
+    map_view(DbName, DDocInfo, ViewName, QueryArgs, []).
 
-map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
+map_view(DbName, {DDocId, Rev}, ViewName, QueryArgs, DbOptions) ->
+    {ok, DDoc} = ddoc_cache:open_doc(mem3:dbname(DbName), DDocId, Rev),
     set_io_priority(DbName, DbOptions),
     {ok, Db} = get_or_create_db(DbName, DbOptions),
     #view_query_args{
@@ -154,10 +155,11 @@ map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
     final_response(Total, Acc#view_acc.offset).
 
 %% @equiv reduce_view(DbName, DDoc, ViewName, QueryArgs, [])
-reduce_view(DbName, DDoc, ViewName, QueryArgs) ->
-    reduce_view(DbName, DDoc, ViewName, QueryArgs, []).
+reduce_view(DbName, DDocInfo, ViewName, QueryArgs) ->
+    reduce_view(DbName, DDocInfo, ViewName, QueryArgs, []).
 
-reduce_view(DbName, #doc{} = DDoc, ViewName, QueryArgs, DbOptions) ->
+reduce_view(DbName, {DDocId, Rev}, ViewName, QueryArgs, DbOptions) ->
+    {ok, DDoc} = ddoc_cache:open_doc(mem3:dbname(DbName), DDocId, Rev),
     Group = couch_view_group:design_doc_to_view_group(DDoc),
     reduce_view(DbName, Group, ViewName, QueryArgs, DbOptions);
 reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
