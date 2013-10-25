@@ -30,7 +30,7 @@ go(DbName, DDoc, VName, Args, Callback, Acc) ->
     Views = couch_view_group:get_views(Group),
     {NthRed, View} = fabric_view:extract_view(nil, VName, Views, reduce),
     {VName, RedSrc} = lists:nth(NthRed, View#view.reduce_funs),
-    RPCArgs = [DDoc, VName, Args],
+    RPCArgs = [fabric_util:doc_id_and_rev(DDoc), VName, Args],
     Shards = fabric_view:get_shards(DbName, Args),
     Repls = fabric_view:get_shard_replacements(DbName, Shards),
     StartFun = fun(Shard) ->
