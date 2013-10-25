@@ -44,7 +44,7 @@ go(DbName, DDoc, VName, Args, Callback, Acc) ->
                 try
                     go(DbName, Workers, Lang, RedSrc, Args, Callback, Acc)
                 after
-                    fabric_util:cleanup(Workers)
+                    fabric_util:cleanup(Workers0 ++ Workers)
                 end;
             {timeout, _} ->
                 Callback({error, timeout}, Acc);

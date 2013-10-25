@@ -50,7 +50,8 @@ submit_jobs(Shards, Module, EndPoint, ExtraArgs) ->
         Shard#shard{ref = Ref}
     end, Shards).
 
-cleanup(Workers) ->
+cleanup(Workers0) ->
+    Workers = lists:ukeysort(#shard.ref, Workers0),
     [rexi:kill(Node, Ref) || #shard{node=Node, ref=Ref} <- Workers].
 
 stream_start(Workers, Keypos) ->
