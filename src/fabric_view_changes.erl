@@ -152,7 +152,7 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
                     send_changes(DbName, Workers, LiveSeqs, ChangesArgs,
                             Callback, AccIn, Timeout)
                 after
-                    fabric_util:cleanup(Workers)
+                    fabric_util:cleanup(Workers0 ++ Workers)
                 end;
             Else ->
                 Callback(Else, AccIn)

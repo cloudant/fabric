@@ -32,7 +32,7 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc) ->
                 try
                     go(DbName, Workers, QueryArgs, Callback, Acc)
                 after
-                    fabric_util:cleanup(Workers)
+                    fabric_util:cleanup(Workers0 ++ Workers)
                 end;
             {timeout, _} ->
                 Callback({error, timeout}, Acc);
