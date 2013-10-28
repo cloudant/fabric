@@ -97,12 +97,12 @@ changes(DbName, Options, StartVector, DbOptions) ->
         try
             {ok, {_, LastSeq, _, _}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
-            rexi:reply({complete, {LastSeq, uuid(Db)}})
+            rexi:stream_last({complete, {LastSeq, uuid(Db)}})
         after
             couch_db:close(Db)
         end;
     Error ->
-        rexi:reply(Error)
+        rexi:stream_last(Error)
     end.
 
 %% @equiv map_view(DbName, DDoc, ViewName, QueryArgs, [])
@@ -197,7 +197,7 @@ reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
             couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options)
         end, Keys)
     end,
-    rexi:reply(complete).
+    rexi:stream_last(complete).
 
 calculate_seqs(Db, Stale) ->
     LastSeq = couch_db:get_update_seq(Db),
@@ -365,14 +365,8 @@ view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total} = Acc) ->
     % calculates the offset for this shard
     #view_acc{reduce_fun=Reduce} = Acc,
     Offset = Reduce(OffsetReds),
-    case rexi:sync_reply({total_and_offset, Total, Offset}) of
-    ok ->
-        view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
-    stop ->
-        exit(normal);
-    timeout ->
-        exit(timeout)
-    end;
+    rexi:stream2({total_and_offset, Total, Offset}),
+    view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
 view_fold(_KV, _Offset, #view_acc{limit=0} = Acc) ->
     % we scanned through limit+skip local rows
     {stop, Acc};
@@ -407,23 +401,14 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
     true ->
         Doc = undefined
     end,
-    case rexi:stream(#view_row{key=Key, id=Id, value=Value, doc=Doc}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        timeout ->
-            exit(timeout)
-    end.
+    rexi:stream2(#view_row{key=Key, id=Id, value=Value, doc=Doc}),
+    {ok, Acc#view_acc{limit=Limit-1}}.
 
 final_response(Total, nil) ->
-    case rexi:sync_reply({total_and_offset, Total, Total}) of ok ->
-        rexi:reply(complete);
-    stop ->
-        ok;
-    timeout ->
-        exit(timeout)
-    end;
+    rexi:stream2({total_and_offset, Total, Total}),
+    rexi:stream_last(complete);
 final_response(_Total, _Offset) ->
-    rexi:reply(complete).
+    rexi:stream_last(complete).
 
 %% TODO: handle case of bogus group level
 group_rows_fun(exact) ->
@@ -450,24 +435,8 @@ reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0 ->
 
 
 send(Key, Value, #view_acc{limit=Limit} = Acc) ->
-    case put(fabric_sent_first_row, true) of
-    undefined ->
-        case rexi:sync_reply(#view_row{key=Key, value=Value}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        stop ->
-            exit(normal);
-        timeout ->
-            exit(timeout)
-        end;
-    true ->
-        case rexi:stream(#view_row{key=Key, value=Value}) of
-        ok ->
-            {ok, Acc#view_acc{limit=Limit-1}};
-        timeout ->
-            exit(timeout)
-        end
-    end.
+    rexi:stream2(#view_row{key=Key, value=Value}),
+    {ok, Acc#view_acc{limit=Limit-1}}.
 
 changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
         {Db, _OldSeq, Args, Options}) ->
@@ -485,8 +454,8 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
-        Go = rexi:sync_reply(ChangesRow),
-        {Go, {Db, Seq, Args, Options}}
+        rexi:stream2(ChangesRow),
+        {ok, {Db, Seq, Args, Options}}
     end.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
