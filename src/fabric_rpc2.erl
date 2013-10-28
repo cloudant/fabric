@@ -450,13 +450,13 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     #doc_info{high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
     case [X || X <- couch_changes:filter(DocInfo, Acc), X /= null] of
     [] ->
-        {ok, {Db, Seq, Args, Options}};
+        ChangesRow = {no_pass, Seq};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
-        ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts),
-        rexi:stream2(ChangesRow),
-        {ok, {Db, Seq, Args, Options}}
-    end.
+        ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts)
+    end,
+    rexi:stream2(ChangesRow),
+    {ok, {Db, Seq, Args, Options}}.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
     Doc = doc_member(Db, DI, Opts),
