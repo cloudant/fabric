@@ -193,12 +193,12 @@ reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
         Options = [{key_group_level, GroupLevel} | Options0],
         couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options);
     _ ->
-        lists:foldl(fun(Key, {ok, FAcc}) ->
+        lists:foldl(fun(Key, FAcc) ->
             KeyArgs = QueryArgs#view_query_args{start_key=Key, end_key=Key},
             Options0 = couch_httpd_view:make_key_options(KeyArgs),
             Options = [{key_group_level, GroupLevel} | Options0],
             couch_view:fold_reduce(ReduceView, fun reduce_fold/3, FAcc, Options)
-        end, {ok, Acc0}, Keys)
+        end, Acc0, Keys)
     end,
     case FoldRet of
         {ok, #view_acc{offset=nil}} ->
