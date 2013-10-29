@@ -93,19 +93,16 @@ changes(DbName, Options, StartVector, DbOptions) ->
         StartSeq = calculate_start_seq(Db, node(), StartVector),
         Enum = fun changes_enumerator/2,
         Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args, Options, false},
+        Acc0 = {Db, StartSeq, Args, Options},
         try
-            {ok, {_, LastSeq, _, _, Started}} =
+            {ok, {_, LastSeq, _, _}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
-            if Started == true -> ok; true ->
-                rexi:stream_init()
-            end,
-            rexi:reply({complete, {LastSeq, uuid(Db)}})
+            rexi:stream_last({complete, {LastSeq, uuid(Db)}})
         after
             couch_db:close(Db)
         end;
     Error ->
-        rexi:reply(Error)
+        rexi:stream_last(Error)
     end.
 
 %% @equiv map_view(DbName, DDoc, ViewName, QueryArgs, [])
@@ -187,27 +184,20 @@ reduce_view(DbName, Group0, ViewName, QueryArgs, DbOptions) ->
     {NthRed, View} = fabric_view:extract_view(Pid, ViewName, Views, reduce),
     ReduceView = {reduce, NthRed, Lang, View},
     Acc0 = #view_acc{group_level = GroupLevel, limit = Limit+Skip},
-    FoldRet = case Keys of
+    case Keys of
     nil ->
         Options0 = couch_httpd_view:make_key_options(QueryArgs),
         Options = [{key_group_level, GroupLevel} | Options0],
         couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options);
     _ ->
-        lists:foldl(fun(Key, {ok, FAcc}) ->
+        lists:map(fun(Key) ->
             KeyArgs = QueryArgs#view_query_args{start_key=Key, end_key=Key},
             Options0 = couch_httpd_view:make_key_options(KeyArgs),
             Options = [{key_group_level, GroupLevel} | Options0],
-            couch_view:fold_reduce(ReduceView, fun reduce_fold/3, FAcc, Options)
-        end, {ok, Acc0}, Keys)
+            couch_view:fold_reduce(ReduceView, fun reduce_fold/3, Acc0, Options)
+        end, Keys)
     end,
-    case FoldRet of
-        {ok, #view_acc{offset=nil}} ->
-            % Stream not yet started
-            rexi:stream_init();
-        _ ->
-            ok
-    end,
-    rexi:reply(complete).
+    rexi:stream_last(complete).
 
 calculate_seqs(Db, Stale) ->
     LastSeq = couch_db:get_update_seq(Db),
@@ -374,9 +364,8 @@ view_fold(#full_doc_info{} = FullDocInfo, OffsetReds, Acc) ->
 view_fold(KV, OffsetReds, #view_acc{offset=nil, total_rows=Total} = Acc) ->
     % calculates the offset for this shard
     #view_acc{reduce_fun=Reduce} = Acc,
-    rexi:stream_init(),
     Offset = Reduce(OffsetReds),
-    rexi:stream({total_and_offset, Total, Offset}),
+    rexi:stream2({total_and_offset, Total, Offset}),
     view_fold(KV, OffsetReds, Acc#view_acc{offset=Offset});
 view_fold(_KV, _Offset, #view_acc{limit=0} = Acc) ->
     % we scanned through limit+skip local rows
@@ -412,15 +401,14 @@ view_fold({{Key,Id}, Value}, _Offset, Acc) ->
     true ->
         Doc = undefined
     end,
-    rexi:stream(#view_row{key=Key, id=Id, value=Value, doc=Doc}),
+    rexi:stream2(#view_row{key=Key, id=Id, value=Value, doc=Doc}),
     {ok, Acc#view_acc{limit=Limit-1}}.
 
 final_response(Total, nil) ->
-    rexi:stream_init(),
-    rexi:stream({total_and_offset, Total, Total}),
-    rexi:reply(complete);
+    rexi:stream2({total_and_offset, Total, Total}),
+    rexi:stream_last(complete);
 final_response(_Total, _Offset) ->
-    rexi:reply(complete).
+    rexi:stream_last(complete).
 
 %% TODO: handle case of bogus group level
 group_rows_fun(exact) ->
@@ -436,9 +424,6 @@ group_rows_fun(GroupLevel) when is_integer(GroupLevel) ->
 
 reduce_fold(_Key, _Red, #view_acc{limit=0} = Acc) ->
     {stop, Acc};
-reduce_fold(Key, Red, #view_acc{offset=nil}=Acc) ->
-    rexi:stream_init(),
-    reduce_fold(Key, Red, Acc#view_acc{offset=streaming});
 reduce_fold(_Key, Red, #view_acc{group_level=0} = Acc) ->
     send(null, Red, Acc);
 reduce_fold(Key, Red, #view_acc{group_level=exact} = Acc) ->
@@ -450,16 +435,13 @@ reduce_fold(K, Red, #view_acc{group_level=I} = Acc) when I > 0 ->
 
 
 send(Key, Value, #view_acc{limit=Limit} = Acc) ->
-    rexi:stream(#view_row{key=Key, value=Value}),
+    rexi:stream2(#view_row{key=Key, value=Value}),
     {ok, Acc#view_acc{limit=Limit-1}}.
 
-changes_enumerator(DocInfo, {Db, Seq, Args, Options, false}) ->
-    rexi:stream_init(),
-    changes_enumerator(DocInfo, {Db, Seq, Args, Options, true});
 changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
-        {Db, _OldSeq, Args, Options, Started}) ->
-    {ok, {Db, Seq, Args, Options, Started}};
-changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Started}) ->
+        {Db, _OldSeq, Args, Options}) ->
+    {ok, {Db, Seq, Args, Options}};
+changes_enumerator(DocInfo, {Db, _Seq, Args, Options}) ->
     #changes_args{
         include_docs = IncludeDocs,
         filter = Acc
@@ -473,8 +455,8 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Started}) ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts)
     end,
-    rexi:stream(ChangesRow),
-    {ok, {Db, Seq, Args, Options, Started}}.
+    rexi:stream2(ChangesRow),
+    {ok, {Db, Seq, Args, Options}}.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
     Doc = doc_member(Db, DI, Opts),
