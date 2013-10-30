@@ -92,9 +92,14 @@ changes(DbName, Options, StartVector, DbOptions) ->
     {ok, Db} ->
         StartSeq = calculate_start_seq(Db, node(), StartVector),
         Enum = fun changes_enumerator/2,
-        Opts = [{dir,Dir}],
-        Acc0 = {Db, StartSeq, Args, Options, false},
         try
+            Opts = case Args of
+                #changes_args{dump=true} ->
+                    [{dir,Dir}, {dump,true}];
+                _ ->
+                    [{dir,Dir}]
+            end,
+            Acc0 = {Db, StartSeq, Args, Options, false},
             {ok, {_, LastSeq, _, _, Started}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
             if Started == true -> ok; true ->
@@ -447,13 +452,15 @@ send(Key, Value, #view_acc{limit=Limit} = Acc) ->
     rexi:stream(#view_row{key=Key, value=Value}),
     {ok, Acc#view_acc{limit=Limit-1}}.
 
+
 changes_enumerator(DocInfo, {Db, Seq, Args, Options, false}) ->
     rexi:stream_init(),
     changes_enumerator(DocInfo, {Db, Seq, Args, Options, true});
+
 changes_enumerator(#doc_info{id= <<"_local/", _/binary>>, high_seq=Seq},
         {Db, _OldSeq, Args, Options, Started}) ->
     {ok, {Db, Seq, Args, Options, Started}};
-changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Started}) ->
+changes_enumerator(#doc_info{}=DocInfo, {Db, _Seq, Args, Options, Started}) ->
     #changes_args{
         include_docs = IncludeDocs,
         filter = Acc
@@ -468,7 +475,17 @@ changes_enumerator(DocInfo, {Db, _Seq, Args, Options, Started}) ->
         ChangesRow = changes_row(Db, DocInfo, Results, Del, IncludeDocs, Opts)
     end,
     rexi:stream(ChangesRow),
-    {ok, {Db, Seq, Args, Options, Started}}.
+    {ok, {Db, Seq, Args, Options, Started}};
+changes_enumerator({end_doc, Ref}, {Db, Seq, Args, Options, true}) ->
+    rexi:stream(#dump_change{type=end_doc, ref=Ref}),
+    {ok, {Db, Seq, Args, Options, true}};
+changes_enumerator({Type, Ref, Change}, {Db, Seq, Args, Options, true}) ->
+    NewSeq = case Type of
+        fdi -> Change#full_doc_info.update_seq;
+        _ -> Seq
+    end,
+    rexi:stream(#dump_change{type=Type, ref=Ref, change=Change}),
+    {ok, {Db, NewSeq, Args, Options, true}}.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
     Doc = doc_member(Db, DI, Opts),

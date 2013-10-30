@@ -31,8 +31,18 @@
     reducer,
     lang,
     sorted,
-    user_acc
+    user_acc,
+    dump = false,
+    dump_seq
 }).
+
+-record(dump_change, {
+    type,
+    seq,
+    ref,
+    change
+}).
+
 
 -record(view_row, {key, id, value, doc, worker}).
 -record(change, {key, id, value, deleted=false, doc, worker}).

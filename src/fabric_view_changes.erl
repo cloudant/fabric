@@ -169,7 +169,8 @@ send_changes(DbName, Workers, Seqs, ChangesArgs, Callback, AccIn, Timeout) ->
         counters = orddict:from_list(Seqs),
         user_acc = AccIn,
         limit = ChangesArgs#changes_args.limit,
-        rows = Seqs % store sequence positions instead
+        rows = Seqs, % store sequence positions instead
+        dump = ChangesArgs#changes_args.dump
     },
     %% TODO: errors need to be handled here
     receive_results(Workers, State, Timeout, Callback).
@@ -198,6 +199,19 @@ handle_message({complete, Key}, Worker, State) when is_tuple(Key) ->
 handle_message(_, _, #collector{limit=0} = State) ->
     {stop, State};
 
+handle_message(#dump_change{} = Row, {Worker, From}, St) ->
+    Seq = case Row#dump_change.type of
+        fdi -> (Row#dump_change.change)#full_doc_info.update_seq;
+        _ -> St#collector.dump_seq
+    end,
+    Change = {change, [
+        {type, Row#dump_change.type},
+        {ref, Row#dump_change.ref},
+        {seq, Seq},
+        {change, Row#dump_change.change}
+    ]},
+    handle_message(Change, {Worker, From}, St#collector{dump_seq=Seq});
+
 handle_message(#change{} = Row, {Worker, From}, St) ->
     Change = {change, [
         {seq, Row#change.key},
@@ -214,7 +228,8 @@ handle_message({change, Props}, {Worker, From}, St) ->
         callback = Callback,
         counters = S0,
         limit = Limit,
-        user_acc = AccIn
+        user_acc = AccIn,
+        dump = Dump
     } = St,
     true = fabric_dict:is_key(Worker, S0),
     S1 = fabric_dict:store(Worker, couch_util:get_value(seq, Props), S0),
@@ -225,7 +240,11 @@ handle_message({change, Props}, {Worker, From}, St) ->
     true ->
         Props2 = lists:keyreplace(seq, 1, Props, {seq, null})
     end,
-    {Go, Acc} = Callback(changes_row(Props2, IncludeDocs), AccIn),
+    {Go, Acc} = if Dump ->
+        Callback({change, {Props2}}, AccIn);
+    true ->
+        Callback(changes_row(Props2, IncludeDocs), AccIn)
+    end,
     rexi:stream_ack(From),
     {Go, St#collector{counters=S1, limit=Limit-1, user_acc=Acc}};
 
@@ -256,6 +275,7 @@ handle_message({complete, Props}, Worker, State) ->
         false -> ok
     end,
     {Go, NewState}.
+
 
 make_changes_args(#changes_args{style=Style, filter=undefined}=Args) ->
     Args#changes_args{filter = Style};
