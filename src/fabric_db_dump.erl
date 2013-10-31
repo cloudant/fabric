@@ -17,14 +17,14 @@
 -include("fabric.hrl").
 
 
--export([go/3]).
+-export([go/4]).
 
 
-go(DbName, Callback, Acc) ->
+go(DbName, Callback, Acc, Args) ->
     Wrapper = fun(Event, WrapperAcc) ->
         changes_callback(Event, WrapperAcc, Callback)
     end,
-    fabric:changes(DbName, Wrapper, Acc, [{dump, true}]).
+    fabric:changes(DbName, Wrapper, Acc, [{dump, true}|Args]).
 
 
 changes_callback(start, Acc, Callback) ->
@@ -34,7 +34,8 @@ changes_callback({change, {Change}}, Acc, Callback) ->
     DumpChange = #dump_change{
         type=couch_util:get_value(type, Change),
         ref=couch_util:get_value(ref, Change),
-        change=couch_util:get_value(change, Change)
+        change=couch_util:get_value(change, Change),
+        seq=couch_util:get_value(seq, Change)
     },
     Callback(DumpChange, Acc);
 

@@ -200,17 +200,16 @@ handle_message(_, _, #collector{limit=0} = State) ->
     {stop, State};
 
 handle_message(#dump_change{} = Row, {Worker, From}, St) ->
-    Seq = case Row#dump_change.type of
-        fdi -> (Row#dump_change.change)#full_doc_info.update_seq;
-        _ -> St#collector.dump_seq
-    end,
-    Change = {change, [
+    Change0 = [
         {type, Row#dump_change.type},
         {ref, Row#dump_change.ref},
-        {seq, Seq},
         {change, Row#dump_change.change}
-    ]},
-    handle_message(Change, {Worker, From}, St#collector{dump_seq=Seq});
+    ],
+    Change = case Row#dump_change.type of
+        fdi -> {change, [{seq, Row#dump_change.seq}|Change0]};
+        _ -> {change, Change0}
+    end,
+    handle_message(Change, {Worker, From}, St);
 
 handle_message(#change{} = Row, {Worker, From}, St) ->
     Change = {change, [
@@ -232,13 +231,19 @@ handle_message({change, Props}, {Worker, From}, St) ->
         dump = Dump
     } = St,
     true = fabric_dict:is_key(Worker, S0),
-    S1 = fabric_dict:store(Worker, couch_util:get_value(seq, Props), S0),
-    % Temporary hack for FB 23637
-    Interval = erlang:get(changes_seq_interval),
-    if (Interval == undefined) orelse (Limit rem Interval == 0) ->
-        Props2 = lists:keyreplace(seq, 1, Props, {seq, pack_seqs(S1)});
-    true ->
-        Props2 = lists:keyreplace(seq, 1, Props, {seq, null})
+    {S2, Props2} = case {Dump, couch_util:get_value(type, Props)} of
+        {true, Type} when Type =/= fdi ->
+            {S0, Props};
+        _ ->
+            S1 = fabric_dict:store(Worker, couch_util:get_value(seq, Props), S0),
+            % Temporary hack for FB 23637
+            Interval = erlang:get(changes_seq_interval),
+            Props1 = if (Interval == undefined) orelse (Limit rem Interval == 0) ->
+                lists:keyreplace(seq, 1, Props, {seq, pack_seqs(S1)});
+            true ->
+                lists:keyreplace(seq, 1, Props, {seq, null})
+            end,
+            {S1, Props1}
     end,
     {Go, Acc} = if Dump ->
         Callback({change, {Props2}}, AccIn);
@@ -246,7 +251,7 @@ handle_message({change, Props}, {Worker, From}, St) ->
         Callback(changes_row(Props2, IncludeDocs), AccIn)
     end,
     rexi:stream_ack(From),
-    {Go, St#collector{counters=S1, limit=Limit-1, user_acc=Acc}};
+    {Go, St#collector{counters=S2, limit=Limit-1, user_acc=Acc}};
 
 handle_message({no_pass, Seq}, {Worker, From}, St) ->
     #collector{counters = S0} = St,

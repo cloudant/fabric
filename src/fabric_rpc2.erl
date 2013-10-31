@@ -480,11 +480,14 @@ changes_enumerator({end_doc, Ref}, {Db, Seq, Args, Options, true}) ->
     rexi:stream(#dump_change{type=end_doc, ref=Ref}),
     {ok, {Db, Seq, Args, Options, true}};
 changes_enumerator({Type, Ref, Change}, {Db, Seq, Args, Options, true}) ->
-    NewSeq = case Type of
-        fdi -> Change#full_doc_info.update_seq;
-        _ -> Seq
+    {DumpChange, NewSeq} = case Type of
+        fdi ->
+            NewSeq0 = Change#full_doc_info.update_seq,
+            {#dump_change{type=Type, ref=Ref, change=Change, seq={NewSeq0, uuid(Db)}}, NewSeq0};
+        _ ->
+            {#dump_change{type=Type, ref=Ref, change=Change}, Seq}
     end,
-    rexi:stream(#dump_change{type=Type, ref=Ref, change=Change}),
+    rexi:stream(DumpChange),
     {ok, {Db, NewSeq, Args, Options, true}}.
 
 changes_row(Db, #doc_info{id=Id, high_seq=Seq}=DI, Results, Del, true, Opts) ->
