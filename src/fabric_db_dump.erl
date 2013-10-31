@@ -40,4 +40,7 @@ changes_callback({change, {Change}}, Acc, Callback) ->
     Callback(DumpChange, Acc);
 
 changes_callback({stop, EndSeq}, Acc, Callback) ->
-    Callback({stop, EndSeq}, Acc).
+    Callback({stop, EndSeq}, Acc);
+
+changes_callback({error, Error}, Acc, Callback) ->
+    Callback({error, Error}, Acc).
