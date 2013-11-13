@@ -198,8 +198,7 @@ append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
         Dict1 = dict:erase(K, Dict0),
         Dict2 = dict:append(Doc, Vals, Dict1),
         append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict2))
-    end.
-    % append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
+    end,
     append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
 
 skip_message({0, _, W, _, DocReplyDict}) ->
