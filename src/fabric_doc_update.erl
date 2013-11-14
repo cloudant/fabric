@@ -35,7 +35,7 @@ go(DbName, AllDocs0, Opts) ->
     % docs have been modified with a hash id so can't use AllDocs
     {Workers, ResultDocs} = lists:unzip(GroupedDocs),
     NewAllDocs = lists:usort(lists:flatten(ResultDocs)),
-
+    
     RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, integer_to_list(mem3:quorum(DbName))),
     Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
@@ -184,6 +184,21 @@ append_update_replies([Doc|Rest], [], Dict0) ->
     % icky, if replicated_changes only errors show up in result
     append_update_replies(Rest, [], dict:append(Doc, noreply, Dict0));
 append_update_replies([Doc|Rest1], [Reply|Rest2], Dict0) ->
+    % TODO what if the same document shows up twice in one update_docs call?
+    % filter dict for existing doc id to get this working
+    Res = lists:filter(fun(D) ->
+        D#doc.id =:= Doc#doc.id
+    end, Dict0:fetch_keys()), 
+
+    case Res of 
+    [] ->
+        append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0));
+    [K] ->
+        Vals = dict:fetch(K, Dict0),
+        Dict1 = dict:erase(K, Dict0),
+        Dict2 = dict:append(Doc, Vals, Dict1),
+        append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict2))
+    end,
     append_update_replies(Rest1, Rest2, dict:append(Doc, Reply, Dict0)).
 
 skip_message({0, _, W, _, DocReplyDict}) ->
