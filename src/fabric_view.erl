@@ -73,7 +73,7 @@ is_progress_possible([{Shard1, _} | _ ] = Counters) ->
             % the normal condition, adding to the tail
             Else
         end
-    end, if (Tail0+1) =:= Ringtop -> complete; true -> Tail0 end, Rest),
+    end, if Tail0 =:= Ringtop -> complete; true -> Tail0 end, Rest),
     (Start =:= 0) andalso (Result =:= complete).
 
 -spec remove_overlapping_shards(#shard{}, [{#shard{}, any()}]) ->
