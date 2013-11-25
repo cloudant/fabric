@@ -54,7 +54,8 @@ is_progress_possible([{Shard1, _} | _] = Counters) ->
     Ranges = fabric_dict:fold(fun(#shard{range=[X,Y]}, _, A) -> [{X,Y}|A] end,
         [], Counters),
     [{Start, Tail0} | Rest] = lists:ukeysort(1, Ranges),
-    Ringtop =  mem3_util:ringtop(Shard1#shard.dbname),
+    % Ringtop =  mem3_util:ringtop(Shard1#shard.dbname),
+    Ringtop = mem3_util:ringtop(Shard1#shard.dbname),
     Result = lists:foldl(fun
     (_, fail) ->
         % we've already declared failure

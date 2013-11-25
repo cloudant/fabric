@@ -170,7 +170,7 @@ good_reply(_) ->
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
 group_docs_by_shard(DbName, Docs) ->
     dict:to_list(lists:foldl(fun(Doc, D0) ->
-        {Shards, {_Type, HashId}} = mem3:shards(DbName, Doc),
+        Shards = mem3:shards(DbName, Doc),
         lists:foldl(fun(Shard, D1) ->
             dict:append(Shard, Doc, D1)
         end, D0, Shards)
