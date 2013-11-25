@@ -371,6 +371,9 @@ changes_row(Props0, IncludeDocs) ->
         {true, {error, Reason}} ->
             % Transform {doc, {error, Reason}} to {error, Reason} for JSON
             lists:keyreplace(doc, 1, Props0, {error, Reason});
+        {true, Doc0} when Doc0 /= undefined ->
+            {ok, Doc} = couch_doc_security:filter(Doc0),
+            lists:keyreplace(doc, 1, Props0, {doc, Doc});
         {false, _} ->
             lists:keydelete(doc, 1, Props0);
         _ ->

@@ -158,6 +158,9 @@ choose_reply(Docs) ->
 
 format_reply({ok, #doc{deleted=true}}, true) ->
     {not_found, deleted};
+format_reply({ok, #doc{}=Doc}, _) ->
+    couch_doc_security:filter(Doc);
+    
 format_reply(Else, _) ->
     Else.
 

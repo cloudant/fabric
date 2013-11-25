@@ -19,7 +19,7 @@
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
--include_lib("eunit/include/eunit.hrl").
+-include_lib("eunit/include/eunit.hrl").    
 
 -record(state, {
     dbname,
@@ -48,8 +48,10 @@ go(DbName, Id, Revs, Options) ->
     RexiMon = fabric_util:create_monitors(Workers),
     try fabric_util:recv(Workers, #shard.ref, fun handle_message/3, State) of
     {ok, {ok, Reply}} ->
-        {ok, Reply};
-    Else ->
+         {ok, format_reply(Reply)};
+    {ok, Reply} ->
+         {ok, format_reply(Reply)};   
+     Else ->
         Else
     after
         rexi_monitor:stop(RexiMon)
@@ -138,6 +140,14 @@ maybe_reply(DbName, ReplyDict, Complete, RepairDocs, R) ->
     false ->
         noreply
     end.
+
+format_reply(DocList) ->
+     MapFun = fun
+         ({ok, #doc{}=Doc}) -> couch_doc_security:filter(Doc);
+         (Else) -> Else
+     end,
+     lists:map(MapFun, DocList).
+ 
 
 extract_replies(Replies) ->
     lists:map(fun({_,{Reply,_}}) -> Reply end, Replies).
