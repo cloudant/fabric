@@ -31,7 +31,10 @@ go(DbName, AllDocs0, Opts) ->
         Ref = rexi:cast(Node, {fabric_rpc, update_docs, [Name,Docs1,Options]}),
         {Shard#shard{ref=Ref}, Docs}
     end, group_docs_by_shard(DbName, AllDocs)),
-    {Workers, _} = lists:unzip(GroupedDocs),
+
+    {Workers, ResultDocs} = lists:unzip(GroupedDocs),
+    NewAllDocs = lists:usort(lists:flatten(ResultDocs)),
+
     RexiMon = fabric_util:create_monitors(Workers),
     W = couch_util:get_value(w, Options, integer_to_list(mem3:quorum(DbName))),
     Acc0 = {length(Workers), length(AllDocs), list_to_integer(W), GroupedDocs,
@@ -39,12 +42,12 @@ go(DbName, AllDocs0, Opts) ->
     Timeout = fabric_util:request_timeout(),
     try rexi_utils:recv(Workers, #shard.ref, fun handle_message/3, Acc0, infinity, Timeout) of
     {ok, {Health, Results}} when Health =:= ok; Health =:= accepted ->
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Results), R =/= noreply]};
+        {Health, [R || R <- couch_util:reorder_results(NewAllDocs, Results), R =/= noreply]};
     {timeout, Acc} ->
         {_, _, W1, _, DocReplDict} = Acc,
         {Health, _, Resp} = dict:fold(fun force_reply/3, {ok, W1, []},
             DocReplDict),
-        {Health, [R || R <- couch_util:reorder_results(AllDocs, Resp), R =/= noreply]};
+        {Health, [R || R <- couch_util:reorder_results(NewAllDocs, Resp), R =/= noreply]};
     Else ->
         Else
     after
@@ -166,10 +169,11 @@ good_reply(_) ->
 
 -spec group_docs_by_shard(binary(), [#doc{}]) -> [{#shard{}, [#doc{}]}].
 group_docs_by_shard(DbName, Docs) ->
-    dict:to_list(lists:foldl(fun(#doc{id=Id} = Doc, D0) ->
+    dict:to_list(lists:foldl(fun(Doc, D0) ->
+        {Shards, {_Type, HashId}} = mem3:shards(DbName, Doc),
         lists:foldl(fun(Shard, D1) ->
             dict:append(Shard, Doc, D1)
-        end, D0, mem3:shards(DbName,Id))
+        end, D0, Shards)
     end, dict:new(), Docs)).
 
 append_update_replies([], [], DocReplyDict) ->

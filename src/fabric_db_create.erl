@@ -65,7 +65,9 @@ generate_shard_map(DbName, Options) ->
         % the DB already exists, and may have a different Suffix
         ok;
     {not_found, _} ->
-        Doc = make_document(Shards, Suffix)
+        HashFun = proplists:get_value(hash, Options),
+        Size = proplists:get_value(size, Options),
+        Doc = make_document(Shards, Suffix, HashFun, Size)
     end,
     {Shards, Doc}.
 
@@ -143,19 +145,21 @@ maybe_stop(W, Counters) ->
         end
     end.
 
-make_document([#shard{dbname=DbName}|_] = Shards, Suffix) ->
+make_document([#shard{dbname=DbName}|_] = Shards, Suffix, HashModule, Size) ->
     {RawOut, ByNodeOut, ByRangeOut} =
     lists:foldl(fun(#shard{node=N, range=[B,E]}, {Raw, ByNode, ByRange}) ->
-        Range = ?l2b([couch_util:to_hex(<<B:32/integer>>), "-",
-            couch_util:to_hex(<<E:32/integer>>)]),
+        Range = ?l2b([couch_util:to_hex(<<B:Size/integer>>), "-",
+            couch_util:to_hex(<<E:Size/integer>>)]),
         Node = couch_util:to_binary(N),
         {[[<<"add">>, Range, Node] | Raw], orddict:append(Node, Range, ByNode),
             orddict:append(Range, Node, ByRange)}
     end, {[], [], []}, Shards),
+    HashFun = {<<"hash_fun">>, <<HashModule/binary,":mem3_hash">>},
     #doc{id=DbName, body = {[
         {<<"shard_suffix">>, Suffix},
         {<<"changelog">>, lists:sort(RawOut)},
         {<<"by_node">>, {[{K,lists:sort(V)} || {K,V} <- ByNodeOut]}},
-        {<<"by_range">>, {[{K,lists:sort(V)} || {K,V} <- ByRangeOut]}}
+        {<<"by_range">>, {[{K,lists:sort(V)} || {K,V} <- ByRangeOut]}},
+        {<<"hash_info">>, {[HashFun, {<<"ring_top">>, 1 bsl Size}]}}
     ]}}.
 
