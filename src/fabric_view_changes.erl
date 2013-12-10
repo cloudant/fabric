@@ -127,15 +127,31 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
             % TODO It's possible in rare cases of shard merging to end up
             % with overlapping shard ranges from this technique
             lists:map(fun(#shard{name=Name2, node=N2} = NewShard) ->
-                Ref = rexi:cast(N2, {fabric_rpc2, changes, [Name2,ChangesArgs,0]}),
+                Ref = rexi:cast(N2, {fabric_rpc2, changes, [Name2, ChangesArgs,
+                    make_replacement_arg(N, Seq)]}),
                 {NewShard#shard{ref = Ref}, 0}
             end, find_replacement_shards(Shard, AllLiveShards))
         end
     end, unpack_seqs(PackedSeqs, DbName)),
     {Workers0, _} = lists:unzip(Seqs),
     Repls = fabric_view:get_shard_replacements(DbName, Workers0),
-    StartFun = fun(#shard{name=Name, node=N}=Shard) ->
-        Ref = rexi:cast(N, {fabric_rpc2, changes, [Name, ChangesArgs, 0]}),
+    StartFun = fun(#shard{name=Name, node=N, range=R0}=Shard) ->
+        %% Find the original shard copy in the Seqs array
+        case lists:dropwhile(fun({S, _}) -> S#shard.range =/= R0 end, Seqs) of
+            % The {_, _}=OldSeq pattern match is so that we don't
+            % accidentally try and replace based on the generated
+            % {replace, _, _, _} tuples.
+            [{#shard{node = OldNode}, {_, _}=OldSeq} | _] ->
+                SeqArg = make_replacement_arg(OldNode, OldSeq);
+            _ ->
+                % TODO this clause is probably unreachable in the N>2
+                % case because we compute replacements only if a shard has one
+                % in the original set.
+                twig:log(error, "Streaming ~s from zero while replacing ~p",
+                    [Name, PackedSeqs]),
+                SeqArg = 0
+        end,
+        Ref = rexi:cast(N, {fabric_rpc2, changes, [Name, ChangesArgs, SeqArg]}),
         Shard#shard{ref = Ref}
     end,
     RexiMon = fabric_util:create_monitors(Workers0),
@@ -256,6 +272,15 @@ handle_message({complete, Props}, Worker, State) ->
         false -> ok
     end,
     {Go, NewState}.
+
+make_replacement_arg(Node, {Seq, Uuid}) ->
+    {replace, Node, Uuid, Seq};
+make_replacement_arg(Node, {Seq, Uuid, _}) ->
+    %% TODO Deprecated, remove when we're confident no seqs with this format
+    %% are in the wild
+    {replace, Node, Uuid, Seq};
+make_replacement_arg(_, _) ->
+    0.
 
 make_changes_args(#changes_args{style=Style, filter=undefined}=Args) ->
     Args#changes_args{filter = Style};
