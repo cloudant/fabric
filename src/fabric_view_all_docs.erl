@@ -69,12 +69,17 @@ go(DbName, QueryArgs, Callback, Acc0) ->
         false -> Keys2
     end,
     Timeout = fabric_util:all_docs_timeout(),
-    receive {'DOWN', Ref0, _, _, {ok, TotalRows}} ->
-        {ok, Acc1} = Callback({total_and_offset, TotalRows, 0}, Acc0),
-        {ok, Acc2} = doc_receive_loop(
-            Keys3, queue:new(), SpawnFun, MaxJobs, Callback, Acc1
-        ),
-        Callback(complete, Acc2)
+    receive {'DOWN', Ref0, _, _, Result} ->
+        case Result of
+            {ok, TotalRows} ->
+                {ok, Acc1} = Callback({total_and_offset, TotalRows, 0}, Acc0),
+                {ok, Acc2} = doc_receive_loop(
+                    Keys3, queue:new(), SpawnFun, MaxJobs, Callback, Acc1
+                ),
+                Callback(complete, Acc2);
+            Error ->
+                Callback({error, Error}, Acc0)
+        end
     after Timeout ->
         Callback(timeout, Acc0)
     end.
@@ -175,22 +180,39 @@ doc_receive_loop(Keys, Pids, SpawnFun, MaxJobs, Callback, AccIn) ->
     _ ->
         {{value, {Pid, Ref}}, RestPids} = queue:out(Pids),
         Timeout = fabric_util:all_docs_timeout(),
-        receive {'DOWN', Ref, process, Pid, #view_row{} = Row} ->
-            case Callback(fabric_view:transform_row(Row), AccIn) of
-            {ok, Acc} ->
-                doc_receive_loop(
-                    Keys, RestPids, SpawnFun, MaxJobs, Callback, Acc
-                );
-            {stop, Acc} ->
+        receive {'DOWN', Ref, process, Pid, Row} ->
+            case Row of
+            #view_row{} ->
+                case Callback(fabric_view:transform_row(Row), AccIn) of
+                {ok, Acc} ->
+                    doc_receive_loop(
+                        Keys, RestPids, SpawnFun, MaxJobs, Callback, Acc
+                    );
+                {stop, Acc} ->
+                    cancel_read_pids(RestPids),
+                    {ok, Acc}
+                end;
+            Error ->
                 cancel_read_pids(RestPids),
-                {ok, Acc}
+                Callback({error, Error}, AccIn)
             end
         after Timeout ->
             timeout
         end
     end.
 
+
 open_doc(DbName, Id, IncludeDocs) ->
+    try
+        open_doc_int(DbName, Id, IncludeDocs)
+    catch Type:Reason ->
+        Stack = erlang:get_stacktrace(),
+        twig:log(err, "_all_docs open error: ~s ~s :: ~w ~w", [
+                DbName, Id, {Type, Reason}, Stack]),
+        exit({Id, Reason})
+    end.
+
+open_doc_int(DbName, Id, IncludeDocs) ->
     Row = case fabric:open_doc(DbName, Id, [deleted]) of
     {not_found, missing} ->
         Doc = undefined,
