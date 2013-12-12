@@ -201,7 +201,18 @@ doc_receive_loop(Keys, Pids, SpawnFun, MaxJobs, Callback, AccIn) ->
         end
     end.
 
+
 open_doc(DbName, Id, IncludeDocs) ->
+    try
+        open_doc_int(DbName, Id, IncludeDocs)
+    catch Type:Reason ->
+        Stack = erlang:get_stacktrace(),
+        twig:log(err, "_all_docs open error: ~s ~s :: ~w ~w", [
+                DbName, Id, {Type, Reason}, Stack]),
+        exit({Id, Reason})
+    end.
+
+open_doc_int(DbName, Id, IncludeDocs) ->
     Row = case fabric:open_doc(DbName, Id, [deleted]) of
     {not_found, missing} ->
         Doc = undefined,
