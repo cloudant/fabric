@@ -203,8 +203,9 @@ doc_receive_loop(Keys, Pids, SpawnFun, MaxJobs, Callback, AccIn) ->
 
 
 open_doc(DbName, Id, IncludeDocs) ->
-    try
-        open_doc_int(DbName, Id, IncludeDocs)
+    try open_doc_int(DbName, Id, IncludeDocs) of
+        #view_row{} = Row ->
+            exit(Row)
     catch Type:Reason ->
         Stack = erlang:get_stacktrace(),
         twig:log(err, "_all_docs open error: ~s ~s :: ~w ~w", [
@@ -228,7 +229,7 @@ open_doc_int(DbName, Id, IncludeDocs) ->
         Value = {[{rev,couch_doc:rev_to_str({RevPos, RevId})}]},
         #view_row{key=Id, id=Id, value=Value}
     end,
-    exit(if IncludeDocs -> Row#view_row{doc=Doc}; true -> Row end).
+    if IncludeDocs -> Row#view_row{doc=Doc}; true -> Row end.
 
 cancel_read_pids(Pids) ->
     case queue:out(Pids) of
