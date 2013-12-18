@@ -66,8 +66,9 @@ generate_shard_map(DbName, Options) ->
         ok;
     {not_found, _} ->
         HashFun = proplists:get_value(hash, Options),
+        Srs = proplists:get_value(srs, Options),
         Size = proplists:get_value(size, Options),
-        Doc = make_document(Shards, Suffix, HashFun, Size)
+        Doc = make_document(Shards, Suffix, HashFun, Srs, Size)
     end,
     {Shards, Doc}.
 
@@ -145,7 +146,7 @@ maybe_stop(W, Counters) ->
         end
     end.
 
-make_document([#shard{dbname=DbName}|_] = Shards, Suffix, HashModule, Size) ->
+make_document([#shard{dbname=DbName}|_] = Shards, Suffix, HashModule, Srs, Size) ->
     {RawOut, ByNodeOut, ByRangeOut} =
     lists:foldl(fun(#shard{node=N, range=[B,E]}, {Raw, ByNode, ByRange}) ->
         Range = ?l2b([couch_util:to_hex(<<B:Size/integer>>), "-",
@@ -160,6 +161,7 @@ make_document([#shard{dbname=DbName}|_] = Shards, Suffix, HashModule, Size) ->
         {<<"changelog">>, lists:sort(RawOut)},
         {<<"by_node">>, {[{K,lists:sort(V)} || {K,V} <- ByNodeOut]}},
         {<<"by_range">>, {[{K,lists:sort(V)} || {K,V} <- ByRangeOut]}},
-        {<<"hash_info">>, {[HashFun, {<<"ring_top">>, 1 bsl Size}]}}
+        {<<"hash_info">>, {[HashFun, {<<"ring_top">>, 1 bsl Size}]}},
+        {<<"srs">>, Srs}
     ]}}.
 
