@@ -176,6 +176,16 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
                 after
                     fabric_util:cleanup(Workers)
                 end;
+            {timeout, NewState} ->
+                DefunctWorkers = fabric_util:remove_done_workers(
+                    NewState#stream_acc.workers,
+                    waiting
+                ),
+                fabric_util:count_timeout(
+                    DefunctWorkers,
+                    'changes'
+                ),
+                throw({error, timeout});
             {error, Reason} ->
                 throw({error, Reason});
             Else ->
