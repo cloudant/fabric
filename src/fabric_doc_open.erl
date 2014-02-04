@@ -127,9 +127,9 @@ read_repair(#acc{dbname=DbName, replies=Replies}) ->
         Res = fabric:update_docs(DbName, Docs, Opts),
         case Res of
             {ok, []} ->
-                margaret_counter:increment([fabric, read_repairs, success]);
+                couch_stats:increment_counter([fabric, read_repairs, success]);
             _ ->
-                margaret_counter:increment([fabric, read_repairs, failure]),
+                couch_stats:increment_counter([fabric, read_repairs, failure]),
                 twig:log(notice, "read_repair ~s ~s ~p", [DbName, Id, Res])
         end,
         choose_reply(Docs);

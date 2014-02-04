@@ -174,9 +174,9 @@ maybe_execute_read_repair(Db, Docs) ->
     Res = fabric:update_docs(Db, Docs, [replicated_changes, {user_ctx,Ctx}]),
     case Res of
         {ok, []} ->
-            margaret_counter:increment([fabric, read_repairs, success]);
+            couch_stats:increment_counter([fabric, read_repairs, success]);
         _ ->
-            margaret_counter:increment([fabric, read_repairs, failure]),
+            couch_stats:increment_counter([fabric, read_repairs, failure]),
             twig:log(notice, "read_repair ~s ~s ~p", [Db, Id, Res])
     end.
 
