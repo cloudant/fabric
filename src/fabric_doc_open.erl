@@ -391,6 +391,7 @@ handle_message_reply_test() ->
 read_repair_test() ->
     start_meck_(),
     meck:expect(twig, log, fun(_, _, _) -> ok end),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
 
     Foo1 = {ok, #doc{revs = {1,[<<"foo">>]}}},
     Foo2 = {ok, #doc{revs = {2,[<<"foo2">>,<<"foo">>]}}},
@@ -430,6 +431,7 @@ handle_response_quorum_met_test() ->
     start_meck_(),
     meck:expect(twig, log, fun(_, _, _) -> ok end),
     meck:expect(fabric, update_docs, fun(_, _, _) -> {ok, []} end),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
 
     Foo1 = {ok, #doc{revs = {1,[<<"foo">>]}}},
     Foo2 = {ok, #doc{revs = {2,[<<"foo2">>,<<"foo">>]}}},
@@ -475,7 +477,7 @@ handle_response_quorum_met_test() ->
 
 
 start_meck_() ->
-    meck:new([twig, rexi, fabric]).
+    meck:new([twig, rexi, fabric, couch_stats]).
 
 stop_meck_() ->
-    meck:unload([twig, rexi, fabric]).
+    meck:unload([twig, rexi, fabric, couch_stats]).
