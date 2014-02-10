@@ -111,10 +111,10 @@ changes(DbName, Options, StartVector, DbOptions) ->
                 pending = couch_db:count_changes_since(Db, StartSeq),
                 epochs = get_epochs(Db)
             },
-            {ok, #cacc{seq=LastSeq, pending=Pending}} =
+            {ok, #cacc{seq=LastSeq, pending=Pending, epochs=Epochs}} =
                 couch_db:changes_since(Db, StartSeq, Enum, Opts, Acc0),
             rexi:stream_last({complete, [
-                {seq, {LastSeq, uuid(Db)}},
+                {seq, {LastSeq, uuid(Db), owner_of(LastSeq, Epochs)}},
                 {pending, Pending}
             ]})
         after
@@ -474,7 +474,7 @@ changes_enumerator(DocInfo, Acc) ->
     #doc_info{id=Id, high_seq=Seq, revs=[#rev_info{deleted=Del}|_]} = DocInfo,
     case [X || X <- couch_changes:filter(DocInfo, Filter), X /= null] of
     [] ->
-        ChangesRow = {no_pass, Seq};
+        ChangesRow = {no_pass, {Seq, uuid(Db), owner_of(Seq, Epochs)}};
     Results ->
         Opts = if Conflicts -> [conflicts]; true -> [] end,
         ChangesRow = {change, [
