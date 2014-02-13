@@ -48,7 +48,7 @@ go(DbName, Id, Options) ->
     try fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
     {ok, #acc{}=Acc} ->
         Reply = handle_response(Acc),
-        format_reply(Reply, SuppressDeletedDoc);
+        format_reply(Reply, SuppressDeletedDoc, Acc#acc.state);
     Error ->
         Error
     after
@@ -155,6 +155,14 @@ choose_reply(Docs) ->
         InfoA > InfoB
     end, Docs),
     {ok, Winner}.
+
+
+format_reply({ok, Doc}, SupressDeleted, r_not_met) ->
+    NewMeta = [r_not_met | Doc#doc.meta],
+    format_reply({ok, Doc#doc{meta=NewMeta}}, SupressDeleted);
+format_reply(Else, SupressDeleted, _) ->
+    format_reply(Else, SupressDeleted).
+
 
 format_reply({ok, #doc{deleted=true}}, true) ->
     {not_found, deleted};
