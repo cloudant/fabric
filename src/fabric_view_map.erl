@@ -141,11 +141,11 @@ handle_message(complete, Worker, State) ->
 
 merge_row(fwd, undefined, Row, Rows) ->
     lists:merge(fun(#view_row{key=KeyA, id=IdA}, #view_row{key=KeyB, id=IdB}) ->
-        couch_view:less_json([KeyA, IdA], [KeyB, IdB])
+        couch_view:less_json_ids({KeyA, IdA}, {KeyB, IdB})
     end, [Row], Rows);
 merge_row(rev, undefined, Row, Rows) ->
     lists:merge(fun(#view_row{key=KeyA, id=IdA}, #view_row{key=KeyB, id=IdB}) ->
-        couch_view:less_json([KeyB, IdB], [KeyA, IdA])
+        couch_view:less_json_ids({KeyB, IdB}, {KeyA, IdA})
     end, [Row], Rows);
 merge_row(_, KeyDict, Row, Rows) ->
     lists:merge(fun(#view_row{key=A, id=IdA}, #view_row{key=B, id=IdB}) ->
