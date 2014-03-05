@@ -47,7 +47,7 @@ delete_shard_db_doc(Doc) ->
     try fabric_util:recv(Workers, #shard.ref, fun handle_db_update/3, Acc0) of
     {timeout, {_, WorkersDict}} ->
         DefunctWorkers = fabric_util:remove_done_workers(WorkersDict, nil),
-        fabric_util:count_timeout(
+        fabric_util:log_timeout(
             DefunctWorkers,
             'delete_shard_db_doc'
         ),

@@ -76,7 +76,7 @@ create_shard_files(Shards) ->
     {error, file_exists} ->
         file_exists;
     {timeout, DefunctWorkers} ->
-        fabric_util:count_timeout(DefunctWorkers, 'create_db'),
+        fabric_util:log_timeout(DefunctWorkers, 'create_db'),
         {error, timeout};
     _ ->
         ok
@@ -111,7 +111,7 @@ create_shard_db_doc(Doc) ->
     try fabric_util:recv(Workers, #shard.ref, fun handle_db_update/3, Acc0) of
     {timeout, {_, WorkersDict}} ->
         DefunctWorkers = fabric_util:remove_done_workers(WorkersDict, nil),
-        fabric_util:count_timeout(
+        fabric_util:log_timeout(
             DefunctWorkers,
             'create_shard_db_doc'
         ),

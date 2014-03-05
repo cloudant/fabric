@@ -50,7 +50,7 @@ go(DbName, Id, Revs, Options) ->
     {ok, {ok, Reply}} ->
         {ok, Reply};
     {timeout, #state{workers=DefunctWorkers}} ->
-        fabric_util:count_timeout(DefunctWorkers, 'open_revs'),
+        fabric_util:log_timeout(DefunctWorkers, 'open_revs'),
         {error, timeout};
     Else ->
         Else

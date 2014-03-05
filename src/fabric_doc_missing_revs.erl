@@ -33,7 +33,7 @@ go(DbName, AllIdsRevs, Options) ->
     Acc0 = {length(Workers), ResultDict, Workers},
     try fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
     {timeout, {_, _, DefunctWorkers}} ->
-        fabric_util:count_timeout(
+        fabric_util:log_timeout(
             DefunctWorkers,
             'get_missing_revs'
         ),

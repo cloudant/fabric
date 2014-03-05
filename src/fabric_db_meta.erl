@@ -36,7 +36,7 @@ set_revs_limit(DbName, Limit, Options) ->
     {ok, ok} ->
         ok;
     {timeout, {DefunctWorkers, _}} ->
-        fabric_util:count_timeout(DefunctWorkers, 'set_revs_limit'),
+        fabric_util:log_timeout(DefunctWorkers, 'set_revs_limit'),
         {error, timeout};
     Error ->
         Error
@@ -67,7 +67,7 @@ set_security(DbName, SecObj, Options) ->
             Error -> Error
         end;
     {timeout, #acc{workers=DefunctWorkers}} ->
-        fabric_util:count_timeout(DefunctWorkers, 'set_security'),
+        fabric_util:log_timeout(DefunctWorkers, 'set_security'),
         {error, timeout};
     Error ->
         Error
@@ -142,7 +142,7 @@ get_all_security(DbName, Options) ->
     {ok, _} ->
         {error, no_majority};
     {timeout, #acc{workers=DefunctWorkers}} ->
-        fabric_util:count_timeout(
+        fabric_util:log_timeout(
             DefunctWorkers,
             'get_all_security'
         ),

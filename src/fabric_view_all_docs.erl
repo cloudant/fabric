@@ -38,7 +38,7 @@ go(DbName, #view_query_args{keys=nil} = QueryArgs, Callback, Acc) ->
                 DefunctWorkers = fabric_util:remove_done_workers(
                     NewState#stream_acc.workers, waiting
                 ),
-                fabric_util:count_timeout(
+                fabric_util:log_timeout(
                     DefunctWorkers,
                     'all_docs'
                 ),

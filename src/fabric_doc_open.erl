@@ -50,7 +50,7 @@ go(DbName, Id, Options) ->
         Reply = handle_response(Acc),
         format_reply(Reply, SuppressDeletedDoc);
     {timeout, #acc{workers=DefunctWorkers}} ->
-        fabric_util:count_timeout(DefunctWorkers, 'open_doc'),
+        fabric_util:log_timeout(DefunctWorkers, 'open_doc'),
         {error, timeout};
     Error ->
         Error

@@ -33,7 +33,7 @@ go(DbName) ->
                     WorkersDict,
                     nil
                 ),
-                fabric_util:count_timeout(
+                fabric_util:log_timeout(
                     DefunctWorkers,
                     'get_db_info'
                 ),

@@ -46,7 +46,7 @@ go(DbName, DDoc, View, Args, Callback, Acc) ->
                     NewState#stream_acc.workers,
                     waiting
                 ),
-                fabric_util:count_timeout(
+                fabric_util:log_timeout(
                     DefunctWorkers,
                     'map_view'
                 ),

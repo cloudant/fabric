@@ -19,7 +19,7 @@
         remove_down_workers/2, doc_id_and_rev/1]).
 -export([request_timeout/0, attachments_timeout/0, all_docs_timeout/0]).
 -export([stream_start/2, stream_start/4]).
--export([count_timeout/2, remove_done_workers/2]).
+-export([log_timeout/2, remove_done_workers/2]).
 
 -compile({inline, [{doc_id_and_rev,1}]}).
 
@@ -152,10 +152,13 @@ timeout(Type, Default) ->
         N -> list_to_integer(N)
     end.
 
-count_timeout(Workers, EndPoint) ->
+log_timeout(Workers, EndPoint) ->
     lists:map(
         fun(#shard{node=Dest}) ->
-            couch_stats_collector:count_timeout(Dest, [fabric, EndPoint])
+            ?LOG_ERROR(
+                "fabric_worker_timeout,~p,~p",
+                [EndPoint, Dest]
+            )
         end, Workers).
 
 remove_done_workers(WorkersDict, WaitingIndicator) ->

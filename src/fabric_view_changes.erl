@@ -181,7 +181,7 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
                     NewState#stream_acc.workers,
                     waiting
                 ),
-                fabric_util:count_timeout(
+                fabric_util:log_timeout(
                     DefunctWorkers,
                     'changes'
                 ),

@@ -33,7 +33,7 @@ go(DbName, #doc{} = DDoc) ->
     try fabric_util:recv(Workers, #shard.ref, fun handle_message/3, Acc0) of
     {timeout, {WorkersDict, _}} ->
         DefunctWorkers = fabric_util:remove_done_workers(WorkersDict, nil),
-        fabric_util:count_timeout(DefunctWorkers, 'group_info'),
+        fabric_util:log_timeout(DefunctWorkers, 'group_info'),
         {error, timeout};
     Else ->
         Else
