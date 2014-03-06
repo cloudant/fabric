@@ -154,10 +154,10 @@ timeout(Type, Default) ->
 
 log_timeout(Workers, EndPoint) ->
     lists:map(
-        fun(#shard{node=Dest}) ->
+        fun(#shard{node=Dest, name=Name}) ->
             ?LOG_ERROR(
-                "fabric_worker_timeout,~p,~p",
-                [EndPoint, Dest]
+                "fabric_worker_timeout ~p,~p,~p",
+                [EndPoint, Dest, Name]
             )
         end, Workers).
 
