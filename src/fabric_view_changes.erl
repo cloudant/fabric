@@ -148,6 +148,8 @@ send_changes(DbName, ChangesArgs, Callback, PackedSeqs, AccIn, Timeout) ->
                 % Don't attempt to replace a replacement
                 SeqArg = 0;
             [{#shard{node = OldNode}, OldSeq} | _] ->
+                twig:log(notice, "Streaming ~s from ~p while replacing ~p",
+                    [Name, OldSeq, PackedSeqs]),
                 SeqArg = make_replacement_arg(OldNode, OldSeq);
             _ ->
                 % TODO this clause is probably unreachable in the N>2
