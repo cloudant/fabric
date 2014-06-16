@@ -339,11 +339,12 @@ make_changes_args(#changes_args{style=Style, filter=undefined}=Args) ->
 make_changes_args(Args) ->
     Args.
 
-get_start_seq(_DbName, #changes_args{dir=fwd, since=Since}) ->
-    Since;
-get_start_seq(DbName, #changes_args{dir=rev}) ->
+get_start_seq(DbName, #changes_args{dir=Dir, since=Since})
+  when Dir == rev; Since == "now" ->
     {ok, Info} = fabric:get_db_info(DbName),
-    couch_util:get_value(update_seq, Info).
+    couch_util:get_value(update_seq, Info);
+get_start_seq(_DbName, #changes_args{dir=fwd, since=Since}) ->
+    Since.
 
 pending_count(Dict) ->
     fabric_dict:fold(fun
@@ -447,6 +448,8 @@ find_replacement_shards(#shard{range=Range}, AllShards) ->
     % TODO make this moar betta -- we might have split or merged the partition
     [Shard || Shard <- AllShards, Shard#shard.range =:= Range].
 
+validate_start_seq(_DbName, "now") ->
+    ok;
 validate_start_seq(DbName, Seq) ->
     try unpack_seqs(Seq, DbName) of _Any ->
         ok
