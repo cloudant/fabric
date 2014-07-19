@@ -122,16 +122,16 @@ force_reply(Doc, [FirstReply|_] = Replies, {Health, W, Acc}) ->
             case lists:all(fun(E) -> E =:= FirstReply end, Replies) of
             true ->
                 CounterKey = [fabric, doc_update, errors],
-                margaret_counter:increment(CounterKey),
+                couch_stats:increment_counter(CounterKey),
                 {Health, W, [{Doc, FirstReply} | Acc]};
             false ->
                 CounterKey = [fabric, doc_update, mismatched_errors],
-                margaret_counter:increment(CounterKey),
+                couch_stats:increment_counter(CounterKey),
                 {error, W, [{Doc, FirstReply} | Acc]}
             end;
         [AcceptedRev | _] ->
             CounterKey = [fabric, doc_update, write_quorum_errors],
-            margaret_counter:increment(CounterKey),
+            couch_stats:increment_counter(CounterKey),
             NewHealth = case Health of ok -> accepted; _ -> Health end,
             {NewHealth, W, [{Doc, {accepted,AcceptedRev}} | Acc]}
         end
@@ -203,6 +203,8 @@ validate_atomic_update(_DbName, AllDocs, true) ->
 
 % eunits
 doc_update1_test() ->
+    meck:new(couch_stats),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
     Doc1 = #doc{revs = {1,[<<"foo">>]}},
     Doc2 = #doc{revs = {1,[<<"bar">>]}},
     Docs = [Doc1],
@@ -271,10 +273,13 @@ doc_update1_test() ->
     ?assertEqual(
         {error, [{Doc1,{accepted,"A"}},{Doc2,{error,internal_server_error}}]},
         ReplyW5
-    ).
+    ),
+    meck:unload(couch_stats).
 
 
 doc_update2_test() ->
+    meck:new(couch_stats),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
     Doc1 = #doc{revs = {1,[<<"foo">>]}},
     Doc2 = #doc{revs = {1,[<<"bar">>]}},
     Docs = [Doc2, Doc1],
@@ -296,7 +301,8 @@ doc_update2_test() ->
         handle_message({rexi_EXIT, 1},lists:nth(3,Shards),Acc2),
 
     ?assertEqual({accepted, [{Doc1,{accepted,Doc2}}, {Doc2,{accepted,Doc1}}]},
-        Reply).
+        Reply),
+    meck:unload(couch_stats).
 
 doc_update3_test() ->
     Doc1 = #doc{revs = {1,[<<"foo">>]}},

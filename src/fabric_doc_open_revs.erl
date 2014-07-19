@@ -174,9 +174,9 @@ maybe_execute_read_repair(Db, Docs) ->
     Res = fabric:update_docs(Db, Docs, [replicated_changes, {user_ctx,Ctx}]),
     case Res of
         {ok, []} ->
-            margaret_counter:increment([fabric, read_repairs, success]);
+            couch_stats:increment_counter([fabric, read_repairs, success]);
         _ ->
-            margaret_counter:increment([fabric, read_repairs, failure]),
+            couch_stats:increment_counter([fabric, read_repairs, failure]),
             twig:log(notice, "read_repair ~s ~s ~p", [Db, Id, Res])
     end.
 
@@ -197,9 +197,11 @@ unstrip_not_found_missing([Else | Rest]) ->
 
 all_revs_test() ->
     config:start_link([]),
-    meck:new(fabric),
+    meck:new([fabric, couch_stats]),
     meck:expect(fabric, dbname, fun(Name) -> Name end),
     meck:expect(fabric, update_docs, fun(_, _, _) -> {ok, nil} end),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
+
     State0 = #state{worker_count = 3, workers=[nil,nil,nil], r = 2, revs = all},
     Foo1 = {ok, #doc{revs = {1, [<<"foo">>]}}},
     Foo2 = {ok, #doc{revs = {2, [<<"foo2">>, <<"foo">>]}}},
@@ -243,14 +245,15 @@ all_revs_test() ->
         {stop, [Bar1, Foo1]},
         handle_message({ok, [Bar1]}, nil, State2)
       ),
-    meck:unload(fabric),
+    meck:unload([fabric, couch_stats]),
     config:stop().
 
 specific_revs_test() ->
     config:start_link([]),
-    meck:new(fabric),
+    meck:new([fabric, couch_stats]),
     meck:expect(fabric, dbname, fun(Name) -> Name end),
     meck:expect(fabric, update_docs, fun(_, _, _) -> {ok, nil} end),
+    meck:expect(couch_stats, increment_counter, fun(_) -> ok end),
     Revs = [{1,<<"foo">>}, {1,<<"bar">>}, {1,<<"baz">>}],
     State0 = #state{
         worker_count = 3,
@@ -312,5 +315,5 @@ specific_revs_test() ->
         {stop, [Foo2, Bar1, Baz2]},
         handle_message({ok, [Foo2, Bar1, Baz2]}, nil, State2L)
       ),
-    meck:unload(fabric),
+    meck:unload([fabric, couch_stats]),
     config:stop().
