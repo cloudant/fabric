@@ -100,6 +100,8 @@ merge_results(Info) ->
             [{disk_size, lists:sum(X)} | Acc];
         (other, X, Acc) ->
             [{other, {merge_other_results(X)}} | Acc];
+        (sizes, X, Acc) ->
+            [{sizes, {fabric_util:merge_size_objects(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
         (_, _, Acc) ->

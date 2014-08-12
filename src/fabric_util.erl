@@ -20,6 +20,7 @@
 -export([request_timeout/0, attachments_timeout/0, all_docs_timeout/0]).
 -export([stream_start/2, stream_start/4]).
 -export([log_timeout/2, remove_done_workers/2]).
+-export([merge_size_objects/1]).
 
 -compile({inline, [{doc_id_and_rev,1}]}).
 
@@ -276,6 +277,28 @@ remove_ancestors_test() ->
         [kv(Bar1,2)],
         remove_ancestors([kv(Bar2,1), kv(Bar1,1)], [])
     ).
+
+% This is shared by fabric_db_info and fabric_group_info to merge
+% their size information results across shards.
+merge_size_objects(SizeObjects) ->
+    Dict = lists:foldl(fun({Props}, D) ->
+        lists:foldl(fun({K, V}, D0) ->
+            orddict:append(K, V, D0)
+        end, D, Props)
+    end, orddict:new(), SizeObjects),
+    orddict:fold(fun
+        (file, X, Acc) ->
+            [{file, lists:sum(X)} | Acc];
+        (active, X, Acc) ->
+            case lists:member(null, X) of
+                true ->
+                    [{active, null} | Acc];
+                false ->
+                    [{active, lists:sum(X)} | Acc]
+            end;
+        (external, X, Acc) ->
+            [{external, lists:sum(X)} | Acc]
+    end, [], Dict).
 
 %% test function
 kv(Item, Count) ->

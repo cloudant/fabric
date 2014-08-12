@@ -88,6 +88,8 @@ merge_results(Info) ->
             [{disk_size, lists:sum(X)} | Acc];
         (data_size, X, Acc) ->
             [{data_size, lists:sum(X)} | Acc];
+        (sizes, X, Acc) ->
+            [{sizes, {fabric_util:merge_size_objects(X)}} | Acc];
         (compact_running, X, Acc) ->
             [{compact_running, lists:member(true, X)} | Acc];
         (updater_running, X, Acc) ->
