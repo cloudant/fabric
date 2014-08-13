@@ -116,10 +116,13 @@ is_r_met(Workers, Replies, R) ->
     end.
 
 read_repair(#acc{dbname=DbName, replies=Replies}) ->
+    CommitRepair = config:get("fabric", "commit_read_repair", "true") =:= "true",
     Docs = [Doc || {_, {{ok, #doc{}=Doc}, _}} <- Replies],
     case Docs of
     % omit local docs from read repair
     [#doc{id = <<?LOCAL_DOC_PREFIX, _/binary>>} | _] ->
+        choose_reply(Docs);
+    [#doc{} | _] when not CommitRepair ->
         choose_reply(Docs);
     [#doc{id=Id} | _] ->
         Ctx = #user_ctx{roles=[<<"_admin">>]},
