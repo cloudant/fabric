@@ -44,6 +44,13 @@ submit_jobs(Shards, EndPoint, ExtraArgs) ->
 submit_jobs(Shards, Module, EndPoint, ExtraArgs) ->
     lists:map(fun(#shard{node=Node, name=ShardName} = Shard) ->
         Ref = rexi:cast(Node, {Module, EndPoint, [ShardName | ExtraArgs]}),
+        %% [pbs-latency-logging]: Coordinator send event.
+        Info = jiffy:encode({[
+                    {modfunc, [fabric_util, submit_jobs]},
+                    {ref, erlang:ref_to_list(Ref)},
+                    {endPoint, EndPoint}
+                ]}),
+        ?LOG_PBS("[~p]", [Info]),
         Shard#shard{ref = Ref}
     end, Shards).
 
