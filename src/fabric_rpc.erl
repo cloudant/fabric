@@ -20,7 +20,7 @@
 -export([all_docs/2, changes/3, map_view/4, reduce_view/4, group_info/2]).
 -export([create_db/1, delete_db/1, reset_validation_funs/1, set_security/3,
     set_revs_limit/3, create_shard_db_doc/2, delete_shard_db_doc/2]).
--export([get_all_security/2]).
+-export([get_all_security/2, open_shard/2]).
 
 -include("fabric.hrl").
 -include_lib("couch/include/couch_db.hrl").
@@ -279,6 +279,15 @@ reset_validation_funs(DbName) ->
         gen_server:cast(Pid, {load_validation_funs, undefined});
     _ ->
         ok
+    end.
+
+open_shard(Name, Opts) ->
+    set_io_priority(Name, Opts),
+    case couch_db:open(Name, Opts) of
+        {ok, Db} ->
+            rexi:reply({ok, {ok, Db}});
+        Error ->
+            rexi:reply(Error)
     end.
 
 %%
