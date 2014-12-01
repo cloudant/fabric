@@ -289,7 +289,12 @@ reset_validation_funs(DbName) ->
 
 open_shard(Name, Opts) ->
     set_io_priority(Name, Opts),
-    rexi:reply(couch_db:open(Name, Opts)).
+    case couch_db:open(Name, Opts) of
+        {ok, Db} ->
+            rexi:reply({ok, {ok, Db}});
+        Error ->
+            rexi:reply(Error)
+    end.
 
 %%
 %% internal
