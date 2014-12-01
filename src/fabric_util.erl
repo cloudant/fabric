@@ -185,7 +185,7 @@ get_shard([#shard{node = Node, name = Name} | Rest], Opts, Timeout, Factor) ->
     try
         receive {Ref, {ok, {ok, Db}}} ->
             {ok, Db};
-        {Ref, {ok, {unauthorized, _} = Error}} ->
+        {Ref, {'rexi_EXIT', {{unauthorized, _} = Error, _}}} ->
             throw(Error);
         {Ref, _Else} ->
             get_shard(Rest, Opts, Timeout, Factor)
