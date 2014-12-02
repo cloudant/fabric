@@ -147,31 +147,44 @@ map_view(DbName, DDoc, ViewName, QueryArgs, DbOptions) ->
     {LastSeq, MinSeq} = calculate_seqs(Db, Stale),
     Group0 = couch_view_group:design_doc_to_view_group(DDoc),
     {ok, Pid} = gen_server:call(couch_view, {get_group_server, DbName, Group0}),
-    {ok, Group} = couch_view_group:request_group(Pid, MinSeq),
-    maybe_update_view_group(Pid, LastSeq, Stale),
-    erlang:monitor(process, couch_view_group:get_fd(Group)),
-    Views = couch_view_group:get_views(Group),
-    View = fabric_view:extract_view(Pid, ViewName, Views, ViewType),
-    {ok, Total} = couch_view:get_row_count(View),
-    FoldFun = fun view_fold/3,
-    Acc0 = #view_acc{
-        db = Db,
-        include_docs = IncludeDocs,
-        conflicts = proplists:get_value(conflicts, Extra, false),
-        limit = Limit+Skip,
-        total_rows = Total,
-        reduce_fun = fun couch_view:reduce_to_count/1
-    },
-    Acc = case Keys of
-    nil ->
-        Options = couch_httpd_view:make_key_options(QueryArgs),
-        {ok, _, Acc1} = couch_view:fold(View, FoldFun, Acc0, Options),
-        Acc1;
-    _ ->
-        {ok, _, Acc2} = couch_view:get_map_keys(View, Keys, FoldFun, Acc0),
-        Acc2
-    end,
-    final_response(Total, Acc#view_acc.offset).
+    CVGResponse = couch_view_group:request_group(
+        Pid,
+        MinSeq,
+        fabric_util:request_timeout()
+    ),
+    case CVGResponse of
+        {error, timeout} ->
+            twig:log(
+                warn,
+                "Timeout while waiting for view group for ~p/~p",
+                [DbName, DDoc]
+            );
+        {ok, Group} ->
+            maybe_update_view_group(Pid, LastSeq, Stale),
+            erlang:monitor(process, couch_view_group:get_fd(Group)),
+            Views = couch_view_group:get_views(Group),
+            View = fabric_view:extract_view(Pid, ViewName, Views, ViewType),
+            {ok, Total} = couch_view:get_row_count(View),
+            FoldFun = fun view_fold/3,
+            Acc0 = #view_acc{
+                db = Db,
+                include_docs = IncludeDocs,
+                conflicts = proplists:get_value(conflicts, Extra, false),
+                limit = Limit+Skip,
+                total_rows = Total,
+                reduce_fun = fun couch_view:reduce_to_count/1
+            },
+            Acc = case Keys of
+            nil ->
+                Options = couch_httpd_view:make_key_options(QueryArgs),
+                {ok, _, Acc1} = couch_view:fold(View, FoldFun, Acc0, Options),
+                Acc1;
+            _ ->
+                {ok, _, Acc2} = couch_view:get_map_keys(View, Keys, FoldFun, Acc0),
+                Acc2
+            end,
+            final_response(Total, Acc#view_acc.offset)
+    end.
 
 %% @equiv reduce_view(DbName, DDoc, ViewName, QueryArgs, [])
 reduce_view(DbName, DDocInfo, ViewName, QueryArgs) ->
