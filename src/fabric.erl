@@ -17,8 +17,6 @@
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
--define(ADMIN_CTX, {user_ctx, #user_ctx{roles = [<<"_admin">>]}}).
-
 % DBs
 -export([all_dbs/0, all_dbs/1, create_db/1, create_db/2, delete_db/1,
     delete_db/2, get_db_info/1, get_doc_count/1, set_revs_limit/3,
@@ -123,13 +121,14 @@ set_revs_limit(DbName, Limit, Options) when is_integer(Limit), Limit > 0 ->
 %% @doc retrieves the maximum number of document revisions
 -spec get_revs_limit(dbname()) -> pos_integer() | no_return().
 get_revs_limit(DbName) ->
-    {ok, Db} = fabric_util:get_db(dbname(DbName), [?ADMIN_CTX]),
+    {ok, Db} = fabric_util:get_db(dbname(DbName), [fabric_util:admin_ctx()]),
     try couch_db:get_revs_limit(Db) after catch couch_db:close(Db) end.
 
 %% @doc sets the readers/writers/admin permissions for a database
 -spec set_security(dbname(), SecObj::json_obj()) -> ok.
 set_security(DbName, SecObj) ->
-    fabric_db_meta:set_security(dbname(DbName), SecObj, [?ADMIN_CTX]).
+    fabric_db_meta:set_security(dbname(DbName), SecObj,
+        [fabric_util:admin_ctx()]).
 
 %% @doc sets the readers/writers/admin permissions for a database
 -spec set_security(dbname(), SecObj::json_obj(), [option()]) -> ok.
@@ -137,7 +136,7 @@ set_security(DbName, SecObj, Options) ->
     fabric_db_meta:set_security(dbname(DbName), SecObj, opts(Options)).
 
 get_security(DbName) ->
-    get_security(DbName, [?ADMIN_CTX]).
+    get_security(DbName, [fabric_util:admin_ctx()]).
 
 %% @doc retrieve the security object for a database
 -spec get_security(dbname()) -> json_obj() | no_return().

@@ -16,7 +16,7 @@
 
 -export([submit_jobs/3, submit_jobs/4, cleanup/1, recv/4, get_db/1, get_db/2, error_info/1,
         update_counter/3, remove_ancestors/2, create_monitors/1, kv/2,
-        remove_down_workers/2, doc_id_and_rev/1]).
+        remove_down_workers/2, doc_id_and_rev/1, admin_ctx/0]).
 -export([request_timeout/0, attachments_timeout/0, all_docs_timeout/0]).
 -export([stream_start/2, stream_start/4]).
 -export([log_timeout/2, remove_done_workers/2]).
@@ -312,3 +312,6 @@ kv(Item, Count) ->
 
 doc_id_and_rev(#doc{id=DocId, revs={RevNum, [RevHash|_]}}) ->
     {DocId, {RevNum, RevHash}}.
+
+admin_ctx() ->
+    {user_ctx, #user_ctx{roles = [<<"_admin">>]}}.

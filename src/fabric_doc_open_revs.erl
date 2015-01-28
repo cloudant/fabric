@@ -172,7 +172,7 @@ maybe_execute_read_repair(_Db, false) ->
     ok;
 maybe_execute_read_repair(Db, Docs) ->
     [#doc{id=Id} | _] = Docs,
-    Ctx = #user_ctx{roles=[<<"_admin">>]},
+    {user_ctx, Ctx} = fabric_util:admin_ctx(),
     Res = fabric:update_docs(Db, Docs, [replicated_changes, {user_ctx,Ctx}]),
     case Res of
         {ok, []} ->
