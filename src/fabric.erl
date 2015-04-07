@@ -40,7 +40,7 @@
 
 -include("fabric.hrl").
 
--type dbname() :: (iodata() | #db{}).
+-type dbname() :: (iodata() | #db2{}).
 -type docid() :: iodata().
 -type revision() :: {integer(), binary()}.
 -type callback() :: fun((any(), any()) -> {ok | stop, any()}).
@@ -409,7 +409,7 @@ dbname(DbName) when is_list(DbName) ->
     list_to_binary(DbName);
 dbname(DbName) when is_binary(DbName) ->
     DbName;
-dbname(#db{name=Name}) ->
+dbname(#db2{name=Name}) ->
     Name;
 dbname(DbName) ->
     erlang:error({illegal_database_name, DbName}).

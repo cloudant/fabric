@@ -41,7 +41,7 @@
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
 all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
-    {ok, #db{id_tree = Bt} = Db} = get_or_create_db(DbName, []),
+    {ok, #db2{id_tree = Bt} = Db} = get_or_create_db(DbName, []),
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
@@ -260,7 +260,7 @@ get_missing_revs(DbName, IdRevsList, Options) ->
             not_found ->
                 {Id, Revs, []}
             end
-        end, IdRevsList, couch_btree:lookup(Db#db.id_tree, Ids))};
+        end, IdRevsList, couch_btree:lookup(Db#db2.id_tree, Ids))};
     Error ->
         Error
     end).
@@ -281,7 +281,7 @@ group_info(DbName, Group0) ->
 
 reset_validation_funs(DbName) ->
     case get_or_create_db(DbName, []) of
-    {ok, #db{main_pid = Pid}} ->
+    {ok, #db2{main_pid = Pid}} ->
         gen_server:cast(Pid, {load_validation_funs, undefined});
     _ ->
         ok
@@ -616,15 +616,15 @@ calculate_start_seq_test() ->
     %% uuid mismatch is always a rewind.
     Hdr1 = couch_db_header:new(),
     Hdr2 = couch_db_header:set(Hdr1, [{epochs, [{node1, 1}]}, {uuid, <<"uuid1">>}]),
-    ?assertEqual(0, calculate_start_seq(#db{header=Hdr2}, node1, {1, <<"uuid2">>})),
+    ?assertEqual(0, calculate_start_seq(#db2{header=Hdr2}, node1, {1, <<"uuid2">>})),
     %% uuid matches and seq is owned by node.
     Hdr3 = couch_db_header:set(Hdr2, [{epochs, [{node1, 1}]}]),
-    ?assertEqual(2, calculate_start_seq(#db{header=Hdr3}, node1, {2, <<"uuid1">>})),
+    ?assertEqual(2, calculate_start_seq(#db2{header=Hdr3}, node1, {2, <<"uuid1">>})),
     %% uuids match but seq is not owned by node.
     Hdr4 = couch_db_header:set(Hdr2, [{epochs, [{node2, 2}, {node1, 1}]}]),
-    ?assertEqual(0, calculate_start_seq(#db{header=Hdr4}, node1, {3, <<"uuid1">>})),
+    ?assertEqual(0, calculate_start_seq(#db2{header=Hdr4}, node1, {3, <<"uuid1">>})),
     %% return integer if we didn't get a vector.
-    ?assertEqual(4, calculate_start_seq(#db{}, foo, 4)).
+    ?assertEqual(4, calculate_start_seq(#db2{}, foo, 4)).
 
 is_owner_test() ->
     ?assertNot(is_owner(foo, 1, [])),
