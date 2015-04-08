@@ -414,7 +414,7 @@ dbname(Db) ->
         true ->
             couch_db:name(Db);
         false ->
-            erlang:error({illegal_database_name, DbName})
+            erlang:error({illegal_database_name, Db})
     end.
 
 name(Thing) ->

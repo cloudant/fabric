@@ -85,7 +85,7 @@ all_docs(DbName, #view_query_args{keys=nil} = QueryArgs, DbOptions) ->
         {start_key, if is_binary(StartKey) -> StartKey; true -> StartDocId end},
         {EndKeyType, if is_binary(EndKey) -> EndKey; true -> EndDocId end}
     ],
-    {ok, Acc} = couch_db:fold_docs(Bt, Options, fun all_docs_fold/4, Acc0),
+    {ok, Acc} = couch_db:fold_docs(Db, Options, fun all_docs_fold/4, Acc0),
     final_response(Total, Acc#view_acc.offset).
 
 %% @equiv changes(DbName, Args, StartSeq, [])

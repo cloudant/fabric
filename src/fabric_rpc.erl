@@ -41,7 +41,7 @@
 %%  call to with_db will supply your M:F with a #db{} and then remaining args
 
 all_docs(DbName, #view_query_args{keys=nil} = QueryArgs) ->
-    {ok, Db} = get_or_create(DbName, []),
+    {ok, Db} = get_or_create_db(DbName, []),
     #view_query_args{
         start_key = StartKey,
         start_docid = StartDocId,
@@ -261,7 +261,7 @@ get_missing_revs(DbName, IdRevsList, Options) ->
             not_found ->
                 {Id, Revs, []}
             end
-        end, IdRevsList, FullDocInfos};
+        end, IdRevsList, FullDocInfos)};
     Error ->
         Error
     end).
@@ -282,7 +282,7 @@ group_info(DbName, Group0) ->
 
 reset_validation_funs(DbName) ->
     case get_or_create_db(DbName, []) of
-    {ok, #db2{main_pid = Pid}} ->
+    {ok, Db} ->
         couch_db:reload_validation_funs(Db);
     _ ->
         ok
