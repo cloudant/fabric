@@ -283,7 +283,7 @@ group_info(DbName, Group0) ->
 reset_validation_funs(DbName) ->
     case get_or_create_db(DbName, []) of
     {ok, Db} ->
-        couch_db:reload_validation_funs(Db);
+        couch_db:reload_validation_functions(Db);
     _ ->
         ok
     end.
