@@ -127,7 +127,7 @@ get_all_security(DbName, Options) ->
         Shards0 when is_list(Shards0) -> Shards0;
         _ -> mem3:shards(DbName)
     end,
-    Admin = [{user_ctx, #user_ctx{roles = [<<"_admin">>]}}],
+    Admin = [fabric_util:admin_ctx()],
     RexiMon = fabric_util:create_monitors(Shards),
     Workers = fabric_util:submit_jobs(Shards, get_all_security, [Admin]),
     Handler = fun handle_get_message/3,

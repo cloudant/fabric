@@ -131,7 +131,7 @@ read_repair(#acc{dbname=DbName, replies=Replies}) ->
     [#doc{id = <<?LOCAL_DOC_PREFIX, _/binary>>} | _] ->
         choose_reply(Docs);
     [#doc{id=Id} | _] ->
-        Ctx = #user_ctx{roles=[<<"_admin">>]},
+        {user_ctx, Ctx} = fabric_util:admin_ctx(),
         Opts = [replicated_changes, {user_ctx, Ctx}],
         Res = fabric:update_docs(DbName, Docs, Opts),
         case Res of
