@@ -296,6 +296,11 @@ open_shard(Name, Opts) ->
             rexi:reply(Error)
     end.
 
+shard_sync_quality_factor(ShardName) ->
+    rexi:reply(
+        fabric_quality_factor:shard_sync_quality_factor(ShardName)
+    ).
+
 %%
 %% internal
 %%
