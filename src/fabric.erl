@@ -281,6 +281,21 @@ all_docs(DbName, Callback, Acc0, QueryArgs) ->
 
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
     {ok, any()}.
+changes(DbName, Callback, {"normal", _, #httpd{path_parts=PP}} = Acc0,
+        Options) when length(PP) == 4 ->
+    Node = lists:nth(3, PP),
+    Range = lists:nth(4, PP),
+    fabric_view_par_changes:direct(dbname(DbName), "normal", Node, Range,
+        Options, Callback, Acc0);
+changes(DbName, Callback, {Feed, #httpd{path_parts=PP}} = Acc0,
+        Options) when length(PP) == 4 ->
+    Node = lists:nth(3, PP),
+    Range = lists:nth(4, PP),
+    fabric_view_par_changes:direct(dbname(DbName), Feed, Node, Range,
+        Options, Callback, Acc0);
+changes(DbName, Callback, Acc0, #changes_args{parallel=true, feed=Feed}=Options) ->
+    fabric_view_par_changes:get_url(dbname(DbName), Feed, Options, Callback, Acc0);
+
 changes(DbName, Callback, Acc0, #changes_args{}=Options) ->
     Feed = Options#changes_args.feed,
     fabric_view_changes:go(dbname(DbName), Feed, Options, Callback, Acc0);

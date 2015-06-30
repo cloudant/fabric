@@ -20,6 +20,9 @@
 %% exported for upgrade purposes.
 -export([keep_sending_changes/8]).
 
+-export([make_changes_args/1, get_start_seq/2, validate_start_seq/2,
+    find_replacement_shards/2, changes_row/1, get_changes_epoch/0]).
+
 -include("fabric.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include_lib("couch/include/couch_db.hrl").
