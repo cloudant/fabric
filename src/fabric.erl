@@ -32,7 +32,7 @@
 
 % Views
 -export([all_docs/4, changes/4, query_view/3, query_view/4, query_view/6,
-    get_view_group_info/2, end_changes/0]).
+    get_view_group_info/2, end_changes/0, set_changes_epoch/1]).
 
 % miscellany
 -export([design_docs/1, reset_validation_funs/1, cleanup_index_files/0,
@@ -337,6 +337,9 @@ get_view_group_info(DbName, DesignId) ->
 -spec end_changes() -> ok.
 end_changes() ->
     fabric_view_changes:increment_changes_epoch().
+
+set_changes_epoch(Epoch) when is_integer(Epoch) ->
+    fabric_view_changes:set_changes_epoch(Epoch).
 
 %% @doc retrieve all the design docs from a database
 -spec design_docs(dbname()) -> {ok, [json_obj()]}.

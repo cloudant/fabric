@@ -15,7 +15,7 @@
 -module(fabric_view_changes).
 
 -export([go/5, pack_seqs/1, unpack_seqs/2]).
--export([increment_changes_epoch/0]).
+-export([increment_changes_epoch/0, set_changes_epoch/1]).
 
 %% exported for upgrade purposes.
 -export([keep_sending_changes/8]).
@@ -90,7 +90,7 @@ keep_sending_changes(DbName, Args, Callback, Seqs, AccIn, Timeout, UpListen, T0)
     } = Collector,
     LastSeq = pack_seqs(NewSeqs),
     MaintenanceMode = config:get("cloudant", "maintenance_mode"),
-    NewEpoch = get_changes_epoch() > erlang:get(changes_epoch),
+    NewEpoch = newer_epoch(erlang:get(changes_epoch), get_changes_epoch()),
     if Limit > Limit2, Feed == "longpoll";
       MaintenanceMode == "true"; MaintenanceMode == "nolb"; NewEpoch ->
         Callback({stop, LastSeq, pending_count(Offset)}, AccOut);
@@ -465,16 +465,28 @@ validate_start_seq(DbName, Seq) ->
     end.
 
 get_changes_epoch() ->
-    case application:get_env(fabric, changes_epoch) of
-        undefined ->
-            increment_changes_epoch(),
-            get_changes_epoch();
-        {ok, Epoch} ->
-            Epoch
-    end.
+    mochiglobal:get(fabric_changes_epoch).
 
 increment_changes_epoch() ->
-    application:set_env(fabric, changes_epoch, os:timestamp()).
+    {MegaSecs, Secs, _MicroSecs} = os:timestamp(),
+    Epoch = MegaSecs * 1000000 + Secs,
+    set_changes_epoch(Epoch).
+
+set_changes_epoch(Epoch) when is_integer(Epoch) ->
+    Current = get_changes_epoch(),
+    set_changes_epoch(Current, Epoch).
+
+set_changes_epoch(undefined, To) ->
+    mochiglobal:put(fabric_changes_epoch, To);
+set_changes_epoch(From, To) when is_integer(From), is_integer(To), To > From ->
+    mochiglobal:put(fabric_changes_epoch, To);
+set_changes_epoch(_From, _To) ->
+    ignored.
+
+newer_epoch(undefined, _) ->
+    true;
+newer_epoch(From, To) when is_integer(From), is_integer(To) ->
+    To > From.
 
 unpack_seqs_test() ->
     meck:new(mem3),
