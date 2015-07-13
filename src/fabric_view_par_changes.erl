@@ -66,7 +66,7 @@ direct(DbName, "normal", Node, Range, Options, Callback, Acc) ->
         Reason = <<"Seq number must be an int for direct changes.">>,
         Callback({error, {bad_request, Reason}}, Acc);
     {false, _} ->
-        Reason = <<"Node argument does not match this node.">>, 
+        Reason = <<"Node argument does not match this node.">>,
         Callback({error, {not_found, Reason}}, Acc)
     end;
 direct(DbName, Feed, Node, Range, Options, Callback, Acc)
@@ -256,7 +256,7 @@ direct_changes_enumerator(DocInfo, Dcacc) ->
                 {id, Id},
                 {changes, Results},
                 {deleted, Del} |
-                if IncludeDocs -> [doc_member(Db, DocInfo, Opts)]; 
+                if IncludeDocs -> [doc_member(Db, DocInfo, Opts)];
                     true -> [] end
             ]
     end,
