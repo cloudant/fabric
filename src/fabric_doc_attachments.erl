@@ -20,33 +20,35 @@
 %% couch api calls
 -export([receiver/2]).
 
+%% exported for callback
+-export([write_chunks/2, write_stream/1]).
+
 receiver(_Req, undefined) ->
     <<"">>;
 receiver(_Req, {unknown_transfer_encoding, Unknown}) ->
     exit({unknown_transfer_encoding, Unknown});
 receiver(Req, chunked) ->
     MiddleMan = spawn(fun() -> middleman(Req, chunked) end),
-    fun(4096, ChunkFun, ok) ->
-        write_chunks(MiddleMan, ChunkFun)
-    end;
+    {?MODULE, write_chunks, MiddleMan};
 receiver(_Req, 0) ->
     <<"">>;
 receiver(Req, Length) when is_integer(Length) ->
     maybe_send_continue(Req),
     Middleman = spawn(fun() -> middleman(Req, Length) end),
-    fun() ->
-        Middleman ! {self(), gimme_data},
-        Timeout = fabric_util:attachments_timeout(),
-        receive
-            {Middleman, Data} ->
-                rexi:reply(attachment_chunk_received),
-                iolist_to_binary(Data)
-        after Timeout ->
-            exit(timeout)
-        end
-    end;
+    {?MODULE, write_stream, Middleman};
 receiver(_Req, Length) ->
     exit({length_not_integer, Length}).
+
+write_stream(Middleman) ->
+    Middleman ! {self(), gimme_data},
+    Timeout = fabric_util:attachments_timeout(),
+    receive
+        {Middleman, Data} ->
+            rexi:reply(attachment_chunk_received),
+            iolist_to_binary(Data)
+    after Timeout ->
+            exit(timeout)
+    end.
 
 %%
 %% internal
