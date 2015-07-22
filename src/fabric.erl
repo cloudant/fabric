@@ -36,7 +36,7 @@
 
 % miscellany
 -export([design_docs/1, reset_validation_funs/1, cleanup_index_files/0,
-    cleanup_index_files/1, dbname/1]).
+    cleanup_index_files/1, dbname/1, upgrade_in_progress/0]).
 
 -include("fabric.hrl").
 
@@ -260,6 +260,7 @@ purge_docs(_DbName, _IdsRevs) ->
         {unknown_transfer_encoding, any()}) ->
     function() | binary().
 att_receiver(Req, Length) ->
+    delay_during_upgrade(),
     fabric_doc_attachments:receiver(Req, Length).
 
 %% @doc retrieves all docs. Additional query parameters, such as `limit',
@@ -515,3 +516,16 @@ kl_to_record(KeyList,RecName) ->
                     Index = lookup_index(couch_util:to_existing_atom(Key),RecName),
                     setelement(Index, Acc, Value)
                         end, Acc0, KeyList).
+
+delay_during_upgrade() ->
+    case upgrade_in_progress() of
+        true ->
+            timer:sleep(500),
+            delay_during_upgrade();
+        _ ->
+            ok
+    end.
+
+-spec upgrade_in_progress() -> boolean().
+upgrade_in_progress() ->
+    config:get_boolean("cloudant", "upgrade_in_progress", false).
