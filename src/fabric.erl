@@ -282,15 +282,13 @@ all_docs(DbName, Callback, Acc0, QueryArgs) ->
 -spec changes(dbname(), callback(), any(), #changes_args{} | [{atom(),any()}]) ->
     {ok, any()}.
 changes(DbName, Callback, {"normal", _, #httpd{path_parts=PP}} = Acc0,
-        Options) when length(PP) == 4 ->
-    Node = lists:nth(3, PP),
-    Range = lists:nth(4, PP),
+        Options) when length(PP) == 4; length(PP) == 5 ->
+    {Node, Range} = get_node_range(PP),
     fabric_view_par_changes:direct(dbname(DbName), "normal", Node, Range,
         Options, Callback, Acc0);
 changes(DbName, Callback, {Feed, #httpd{path_parts=PP}} = Acc0,
-        Options) when length(PP) == 4 ->
-    Node = lists:nth(3, PP),
-    Range = lists:nth(4, PP),
+        Options) when length(PP) == 4; length(PP) == 5 ->
+    {Node, Range} = get_node_range(PP),
     fabric_view_par_changes:direct(dbname(DbName), Feed, Node, Range,
         Options, Callback, Acc0);
 changes(DbName, Callback, Acc0, #changes_args{parallel=true, feed=Feed}=Options) ->
@@ -530,3 +528,9 @@ kl_to_record(KeyList,RecName) ->
                     Index = lookup_index(couch_util:to_existing_atom(Key),RecName),
                     setelement(Index, Acc, Value)
                         end, Acc0, KeyList).
+
+get_node_range(PP) ->
+    L = length(PP),
+    Node = lists:nth(L-1, PP),
+    Range = lists:nth(L, PP),
+    {Node, Range}.

@@ -45,7 +45,7 @@ get_url(DbName, _, #changes_args{parallel=true, since=OrigSeq}=Options,
     end.
 
 direct(DbName, "normal", Node, Range, Options, Callback, Acc) ->
-    SameNode = Node =:= get_node_name(),
+    SameNode = Node =:= get_node(),
     Args = fabric_view_changes:make_changes_args(Options),
     Since = fabric_view_changes:get_start_seq(DbName, Args),
     SinceInt = (catch list_to_integer(Since)),
@@ -71,7 +71,7 @@ direct(DbName, "normal", Node, Range, Options, Callback, Acc) ->
     end;
 direct(DbName, Feed, Node, Range, Options, Callback, Acc)
         when Feed == "continuous" orelse Feed == "longpoll" ->
-    SameNode = Node =:= get_node_name(),
+    SameNode = Node =:= get_node(),
     Args = fabric_view_changes:make_changes_args(Options),
     Since = fabric_view_changes:get_start_seq(DbName, Args),
     SinceInt = (catch list_to_integer(Since)),
@@ -271,9 +271,10 @@ get_replacement_shard(Shard, AllLiveShards) ->
     N = random:uniform(length(Shards)),
     lists:nth(N, Shards).
 
-get_node_name() ->
-    [NodeName | _] = string:tokens(atom_to_list(node()), "@"),
-    list_to_binary(NodeName).
+get_node() ->
+    [_, Host] = string:tokens(atom_to_list(node()), "@"),
+    [Node | _] = string:tokens(Host, "."),
+    list_to_binary(Node).
 
 doc_member(Shard, DocInfo, Opts) ->
     case couch_db:open_doc(Shard, DocInfo, [deleted | Opts]) of
