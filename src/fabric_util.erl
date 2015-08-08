@@ -154,6 +154,8 @@ timeout(Type, Default) ->
     end.
 
 log_timeout(Workers, EndPoint) ->
+    CounterKey = [fabric, worker, timeouts],
+    couch_stats:increment_counter(CounterKey),
     lists:map(fun(#shard{node=Dest, name=Name}) ->
         Fmt = "fabric_worker_timeout ~s,~p,~p",
         ?LOG_ERROR(Fmt, [EndPoint, Dest, Name])
