@@ -260,7 +260,6 @@ purge_docs(_DbName, _IdsRevs) ->
         {unknown_transfer_encoding, any()}) ->
     function() | binary().
 att_receiver(Req, Length) ->
-    delay_during_upgrade(),
     fabric_doc_attachments:receiver(Req, Length).
 
 %% @doc retrieves all docs. Additional query parameters, such as `limit',
