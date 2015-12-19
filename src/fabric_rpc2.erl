@@ -96,7 +96,17 @@ changes(DbName, #changes_args{} = Args, StartVector, DbOptions) ->
     changes(DbName, [Args], StartVector, DbOptions);
 changes(DbName, Options, StartVector, DbOptions) ->
     set_io_priority(DbName, DbOptions),
-    #changes_args{dir=Dir} = Args = lists:keyfind(changes_args, 1, Options),
+    Args0 = lists:keyfind(changes_args, 1, Options),
+    #changes_args{dir=Dir, filter=Filter} = Args0,
+    Args = case Filter of
+        {fetch, Style, {DbArg, JsonReq, {DDocId, Rev}, FName}} ->
+            {ok, DDoc} = ddoc_cache:open_doc(fabric:dbname(DbArg), DDocId, Rev),
+            Args0#changes_args{
+                filter={custom, Style, {DbArg, JsonReq, DDoc, FName}}
+            };
+        _ ->
+            Args0
+    end,
     case get_or_create_db(DbName, DbOptions) of
     {ok, Db} ->
         StartSeq = calculate_start_seq(Db, node(), StartVector),
