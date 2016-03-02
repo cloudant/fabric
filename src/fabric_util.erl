@@ -21,6 +21,7 @@
 -export([stream_start/2, stream_start/4]).
 -export([log_timeout/2, remove_done_workers/2]).
 -export([merge_size_objects/1]).
+-export([use_fetch_ddoc_rpc/0]).
 
 -compile({inline, [{doc_id_and_rev,1}]}).
 
@@ -314,3 +315,7 @@ kv(Item, Count) ->
 
 doc_id_and_rev(#doc{id=DocId, revs={RevNum, [RevHash|_]}}) ->
     {DocId, {RevNum, RevHash}}.
+
+use_fetch_ddoc_rpc() ->
+    config:get_boolean("fabric", "use_fetch_ddoc_rpc", false).
+
