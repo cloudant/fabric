@@ -296,9 +296,10 @@ index_of(X, [X|_Rest], I) ->
 index_of(X, [_|Rest], I) ->
     index_of(X, Rest, I+1).
 
-get_shards(DbName, #view_query_args{stale=Stale})
-  when Stale == ok orelse Stale == update_after ->
+get_shards(DbName, #view_query_args{stale=Stale}) when Stale == ok ->
     mem3:ushards(DbName);
+get_shards(DbName, #view_query_args{stale=Stale}) when Stale == update_after ->
+    mem3:shards(DbName);
 get_shards(DbName, #view_query_args{stale=false}) ->
     mem3:shards(DbName).
 
