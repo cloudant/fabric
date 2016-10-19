@@ -104,9 +104,11 @@ merge_results(Info) ->
             [{sizes, {fabric_util:merge_size_objects(X)}} | Acc];
         (disk_format_version, X, Acc) ->
             [{disk_format_version, lists:max(X)} | Acc];
+        (instance_start_time, X, Acc) ->
+            [{instance_start_time, lists:max(X)} | Acc];
         (_, _, Acc) ->
             Acc
-    end, [{instance_start_time, <<"0">>}], Dict).
+    end, [], Dict).
 
 merge_other_results(Results) ->
     Dict = lists:foldl(fun({Props}, D) ->
